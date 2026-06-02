@@ -275,12 +275,23 @@ function environmentsForDeck(deckId) {
 }
 
 function sessionRecord(sessionId) {
-  const summary = summarizeMatches(matchesForSession(sessionId));
+  const summary = sessionSummary(sessionId);
   return `${summary.wins}-${summary.losses}${summary.draws ? `-${summary.draws}` : ""}`;
+}
+
+function sessionSummary(sessionId) {
+  return summarizeMatches(matchesForSession(sessionId));
 }
 
 function recordText(summary) {
   return `${summary.wins}-${summary.losses}-${summary.draws || 0}`;
+}
+
+function recordToneClass(record) {
+  if ((record.total || 0) === 0) return "neutral";
+  if (record.wins > record.losses) return "positive";
+  if (record.wins < record.losses) return "negative";
+  return "neutral";
 }
 
 function formatDate(value) {
@@ -329,7 +340,7 @@ function renderDecks() {
             <strong class="list-title">${escapeHtml(deck.name)}</strong>
             <span class="list-meta"><span>□ ${deck.sessions}セッション</span><span>⚔ ${deck.total}試合</span></span>
           </span>
-          <span class="score-pill">${deck.wins}-${deck.losses}</span>
+          <span class="score-pill ${recordToneClass(deck)}">${deck.wins}-${deck.losses}</span>
         </button>
       `).join("") || `<div class="empty-card">＋ からデッキを登録しましょう</div>`}
     </div>
@@ -348,6 +359,7 @@ function renderDeckDetail(deckId) {
     <div class="list-stack">
       ${deckSessions.map((session) => {
         const count = matchesForSession(session.id).length;
+        const summary = sessionSummary(session.id);
         return `
           <button class="list-card" type="button" data-open-session="${session.id}">
             <span class="badge">1</span>
@@ -355,7 +367,7 @@ function renderDeckDetail(deckId) {
               <strong class="list-title">${escapeHtml(session.name)}</strong>
               <span class="list-meta"><span>□ ${formatDate(session.date)}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>⚔ ${count}試合</span></span>
             </span>
-            <span class="score-pill">${sessionRecord(session.id)}</span>
+            <span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span>
           </button>
         `;
       }).join("") || `<div class="empty-card">このデッキのセッションを登録しましょう</div>`}
@@ -535,7 +547,7 @@ function renderPlayers() {
               <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
               <span>
                 <strong class="round-title">${escapeHtml(match.myDeck)} vs ${escapeHtml(match.opponentDeck)}</strong>
-                <span class="round-meta"><span>${escapeHtml(session?.name || "")}</span><span>${firstLabels[match.firstPlayer]}</span><span>相手${rpsLabels[match.opponentRps]}</span></span>
+                <span class="round-meta"><span>${formatDate(session?.date)}</span><span>${escapeHtml(session?.name || "")}</span><span>${firstLabels[match.firstPlayer]}</span><span>相手${rpsLabels[match.opponentRps]}</span></span>
               </span>
             </button>
           `;
@@ -569,6 +581,7 @@ function renderSessions() {
     <div class="list-stack">
       ${sessions.map((session) => {
         const deck = getDeck(session.deckId);
+        const summary = sessionSummary(session.id);
         return `
           <button class="list-card" type="button" data-open-session="${session.id}">
             <span class="badge">□</span>
@@ -576,7 +589,7 @@ function renderSessions() {
               <strong class="list-title">${escapeHtml(session.name)}</strong>
               <span class="list-meta"><span>${escapeHtml(deck?.name || "未設定")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${formatDate(session.date)}</span></span>
             </span>
-            <span class="score-pill">${sessionRecord(session.id)}</span>
+            <span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span>
           </button>
         `;
       }).join("") || `<div class="empty-card">＋ からセッションを登録しましょう</div>`}

@@ -503,6 +503,24 @@ button {
   font-weight: 900;
 }
 
+.score-pill.positive {
+  border-color: var(--blue-line);
+  background: rgba(30, 81, 135, 0.54);
+  color: #c8e3ff;
+}
+
+.score-pill.neutral {
+  border-color: rgba(229, 185, 73, 0.72);
+  background: rgba(229, 185, 73, 0.16);
+  color: #ffe6a3;
+}
+
+.score-pill.negative {
+  border-color: var(--red-line);
+  background: rgba(158, 46, 68, 0.42);
+  color: #ffd0da;
+}
+
 .result-pill.loss {
   border-color: var(--red-line);
   background: rgba(158, 46, 68, 0.42);
