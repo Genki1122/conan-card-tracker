@@ -870,6 +870,45 @@ label {
   background: #17141d;
 }
 
+.cloud-manager {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(157, 123, 255, 0.38);
+  border-radius: 14px;
+  background: rgba(109, 77, 215, 0.12);
+}
+
+.cloud-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.cloud-head span,
+.cloud-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.cloud-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.ghost-action {
+  border: 1px solid var(--line);
+  background: #17141d;
+  color: var(--text);
+}
+
+.compact-help {
+  padding: 10px;
+}
+
 .danger-zone {
   display: grid;
   gap: 8px;

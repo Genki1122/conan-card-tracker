@@ -15,8 +15,19 @@ python3 -m http.server 4174
 1. このフォルダを静的サイトとして公開します。
 2. スマホで公開URLを開きます。
 3. iPhoneなら Safari の共有メニューから「ホーム画面に追加」します。
-4. PC側のデータを移したい場合は、3点メニューの JSON コピーを使い、スマホ側で JSON インポートします。
+4. ログイン同期を使わない場合は、3点メニューの JSON コピー/インポートで端末間移行できます。
 
 ## データ保存
 
-データはブラウザの `localStorage` に保存されます。ログインや端末間同期はまだありません。
+未ログイン時のデータはブラウザの `localStorage` に保存されます。Supabaseを設定してメールログインすると、PCとスマホで同じクラウドデータを参照できます。
+
+## Supabase同期
+
+1. Supabaseでプロジェクトを作成します。
+2. SQL Editorで `supabase/schema.sql` を実行します。
+3. Authentication > URL Configurationで、GitHub PagesのURLをSite URLとRedirect URLsに登録します。
+4. Project Settings > APIから `Project URL` と `anon public` keyを控えます。
+5. アプリの3点メニュー > クラウド同期にURLとAnon keyを入力します。
+6. メールアドレスを入力してログイン用メールを送ります。
+
+`anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。

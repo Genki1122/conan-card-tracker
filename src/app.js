@@ -6,6 +6,17 @@ import {
   summarizeDecks,
   summarizeMatches
 } from "./analytics.js";
+import {
+  cloudSnapshot,
+  getCloudConfig,
+  initializeCloud,
+  isCloudConfigured,
+  loadCloudState,
+  saveCloudConfig,
+  saveCloudState,
+  signInWithEmail,
+  signOutCloud
+} from "./cloud.js";
 
 const storageKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -33,6 +44,10 @@ let route = { name: "decks" };
 let dialogMode = null;
 let editingMatchId = null;
 let editingSessionId = null;
+let cloudStatus = cloudSnapshot("local");
+let cloudMessage = "";
+let cloudSaveTimer = null;
+let suppressCloudSave = false;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
@@ -155,6 +170,27 @@ function makeMatch(sessionId, myDeck, opponentDeck, opponentPlayer, result, firs
 
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
+  if (!suppressCloudSave) scheduleCloudSave();
+}
+
+function scheduleCloudSave() {
+  if (!cloudStatus.signedIn) return;
+  window.clearTimeout(cloudSaveTimer);
+  cloudMessage = "クラウド保存待ち";
+  cloudSaveTimer = window.setTimeout(async () => {
+    try {
+      await saveCloudState(state);
+      cloudMessage = "クラウド保存済み";
+      rerenderOpenMenu();
+    } catch (error) {
+      cloudMessage = `クラウド保存失敗: ${error.message}`;
+      rerenderOpenMenu();
+    }
+  }, 500);
+}
+
+function rerenderOpenMenu() {
+  if (dialog.open && dialogMode === "menu") openDialog("menu");
 }
 
 function updateSuggestions() {
@@ -653,6 +689,7 @@ function openDialog(mode, targetId = null) {
     dialogSubmit.hidden = true;
     dialogFields.innerHTML = `
       ${pageAction}
+      ${cloudMenuMarkup()}
       <div class="menu-note">
         <strong>自動保存中</strong>
         <span>入力した内容はこの端末のブラウザに保存されています。</span>
@@ -727,7 +764,7 @@ function openDialog(mode, targetId = null) {
     `;
   }
 
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
 }
 
 entryForm.addEventListener("submit", (event) => {
@@ -818,6 +855,66 @@ view.addEventListener("change", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  if (event.target.closest("[data-save-cloud-config]")) {
+    const url = dialogFields.querySelector("input[name='supabaseUrl']").value;
+    const anonKey = dialogFields.querySelector("input[name='supabaseAnonKey']").value;
+    if (!url.trim() || !anonKey.trim()) {
+      cloudMessage = "Supabase URLとAnon keyを入力してください";
+      openDialog("menu");
+      return;
+    }
+    saveCloudConfig(url, anonKey);
+    cloudMessage = "Supabase設定を保存しました";
+    refreshCloudSession();
+    openDialog("menu");
+    return;
+  }
+
+  if (event.target.closest("[data-cloud-login]")) {
+    const input = dialogFields.querySelector("input[name='cloudEmail']");
+    const email = input.value.trim();
+    if (!email) {
+      input.setCustomValidity("メールアドレスを入力してください");
+      input.reportValidity();
+      input.setCustomValidity("");
+      return;
+    }
+    signInWithEmail(email)
+      .then(() => {
+        cloudMessage = "ログイン用メールを送信しました";
+        openDialog("menu");
+      })
+      .catch((error) => {
+        cloudMessage = `ログイン失敗: ${error.message}`;
+        openDialog("menu");
+      });
+    return;
+  }
+
+  if (event.target.closest("[data-cloud-download]")) {
+    pullCloudState();
+    return;
+  }
+
+  if (event.target.closest("[data-cloud-upload]")) {
+    pushCloudState();
+    return;
+  }
+
+  if (event.target.closest("[data-cloud-logout]")) {
+    signOutCloud()
+      .then((nextStatus) => {
+        cloudStatus = nextStatus;
+        cloudMessage = "ログアウトしました";
+        openDialog("menu");
+      })
+      .catch((error) => {
+        cloudMessage = `ログアウト失敗: ${error.message}`;
+        openDialog("menu");
+      });
+    return;
+  }
+
   const deleteDeckButton = event.target.closest("[data-delete-current-deck]");
   if (deleteDeckButton) {
     const deck = getDeck(deleteDeckButton.dataset.deleteCurrentDeck);
@@ -925,6 +1022,7 @@ document.querySelector("#moreButton").addEventListener("click", () => {
 saveState();
 render();
 registerServiceWorker();
+refreshCloudSession();
 
 function passOptions(selected = "none") {
   return [
@@ -954,6 +1052,87 @@ function preferredEnvironment() {
 
 function addEnvironment(environment) {
   state.environments = uniqueValues([...(state.environments || []), environment]);
+}
+
+async function refreshCloudSession() {
+  if (!isCloudConfigured()) {
+    cloudStatus = cloudSnapshot("local");
+    return;
+  }
+
+  try {
+    cloudStatus = await initializeCloud((nextStatus) => {
+      const wasSignedIn = cloudStatus.signedIn;
+      cloudStatus = nextStatus;
+      if (!wasSignedIn && nextStatus.signedIn) pullCloudState({ uploadWhenEmpty: true });
+      rerenderOpenMenu();
+    });
+    if (cloudStatus.signedIn) await pullCloudState({ uploadWhenEmpty: true, silent: true });
+    rerenderOpenMenu();
+  } catch (error) {
+    cloudMessage = `クラウド接続失敗: ${error.message}`;
+    rerenderOpenMenu();
+  }
+}
+
+async function pullCloudState(options = {}) {
+  const { uploadWhenEmpty = false, silent = false } = options;
+  try {
+    if (!silent) {
+      cloudMessage = "クラウド読込中";
+      rerenderOpenMenu();
+    }
+    const remote = await loadCloudState();
+    if (remote?.data) {
+      suppressCloudSave = true;
+      state = normalizeState(remote.data);
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      suppressCloudSave = false;
+      cloudMessage = `クラウドから読込済み ${formatSyncTime(remote.updated_at)}`;
+      route = { name: "decks" };
+      render();
+      rerenderOpenMenu();
+      return;
+    }
+
+    if (uploadWhenEmpty) {
+      await pushCloudState({ silent: true });
+      cloudMessage = "この端末のデータをクラウドへ保存しました";
+    } else {
+      cloudMessage = "クラウドにデータはまだありません";
+    }
+    rerenderOpenMenu();
+  } catch (error) {
+    suppressCloudSave = false;
+    cloudMessage = `クラウド読込失敗: ${error.message}`;
+    rerenderOpenMenu();
+  }
+}
+
+async function pushCloudState(options = {}) {
+  const { silent = false } = options;
+  try {
+    if (!silent) {
+      cloudMessage = "クラウド保存中";
+      rerenderOpenMenu();
+    }
+    const updatedAt = await saveCloudState(state);
+    cloudMessage = `クラウド保存済み ${formatSyncTime(updatedAt)}`;
+    rerenderOpenMenu();
+  } catch (error) {
+    cloudMessage = `クラウド保存失敗: ${error.message}`;
+    rerenderOpenMenu();
+  }
+}
+
+function formatSyncTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
 }
 
 function breakdownCard(label, record, rateValue) {
@@ -990,6 +1169,47 @@ function registerServiceWorker() {
       // PWA support is optional; the app still works in a normal browser tab.
     });
   });
+}
+
+function cloudMenuMarkup() {
+  const config = getCloudConfig();
+  const statusText = cloudStatus.signedIn
+    ? `ログイン中: ${cloudStatus.email}`
+    : cloudStatus.configured
+      ? "Supabase設定済み / 未ログイン"
+      : "未設定";
+
+  return `
+    <div class="cloud-manager">
+      <div class="cloud-head">
+        <strong>クラウド同期</strong>
+        <span>${escapeHtml(statusText)}</span>
+      </div>
+      ${cloudMessage ? `<p class="cloud-message">${escapeHtml(cloudMessage)}</p>` : ""}
+      ${cloudStatus.configured ? "" : `
+        <label>Supabase URL<input name="supabaseUrl" inputmode="url" placeholder="https://xxxx.supabase.co" value="${escapeHtml(config.url || "")}"></label>
+        <label>Anon key<input name="supabaseAnonKey" placeholder="eyJ..." value="${escapeHtml(config.anonKey || "")}"></label>
+        <button class="primary-button inline-action" type="button" data-save-cloud-config>Supabase設定を保存</button>
+      `}
+      ${cloudStatus.configured && !cloudStatus.signedIn ? `
+        <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <button class="primary-button inline-action" type="button" data-cloud-login>ログイン用メールを送る</button>
+        <details class="import-panel compact-help">
+          <summary>Supabase設定を変更</summary>
+          <label>Supabase URL<input name="supabaseUrl" inputmode="url" value="${escapeHtml(config.url || "")}"></label>
+          <label>Anon key<input name="supabaseAnonKey" value="${escapeHtml(config.anonKey || "")}"></label>
+          <button class="primary-button inline-action" type="button" data-save-cloud-config>Supabase設定を保存</button>
+        </details>
+      ` : ""}
+      ${cloudStatus.signedIn ? `
+        <div class="cloud-actions">
+          <button class="primary-button inline-action" type="button" data-cloud-download>クラウドから読込</button>
+          <button class="primary-button inline-action ghost-action" type="button" data-cloud-upload>この端末をアップロード</button>
+          <button class="danger-button" type="button" data-cloud-logout>ログアウト</button>
+        </div>
+      ` : ""}
+    </div>
+  `;
 }
 
 function routeActionMarkup() {
