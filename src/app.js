@@ -1,6 +1,5 @@
 import {
-  getAnalysisInsights,
-  getOpponentTurnBreakdown,
+  getCrossBreakdown,
   getPlayerBreakdown,
   getPlayerRecord,
   getRpsBreakdown,
@@ -195,6 +194,64 @@ function matchesForDeck(deckId) {
   return state.matches.filter((match) => ids.has(match.sessionId));
 }
 
+function enrichMatches(matches) {
+  return matches.map((match, index) => {
+    const session = getSession(match.sessionId);
+    return {
+      ...match,
+      environment: session?.environment || "未設定",
+      store: session?.name || "未設定",
+      date: session?.date || "",
+      order: index
+    };
+  });
+}
+
+function analysisMatchesForDeck(deckId, environment = "", store = "") {
+  const sessions = sessionsForDeck(deckId).filter((session) => (
+    (!environment || session.environment === environment)
+    && (!store || session.name === store)
+  ));
+  const ids = new Set(sessions.map((session) => session.id));
+  return enrichMatches(state.matches.filter((match) => ids.has(match.sessionId)));
+}
+
+function storesForDeck(deckId, environment = "") {
+  return uniqueValues(
+    sessionsForDeck(deckId)
+      .filter((session) => !environment || session.environment === environment)
+      .map((session) => session.name)
+  );
+}
+
+function applyPeriod(matches, period) {
+  const limit = Number(period);
+  if (!limit) return matches;
+  return [...matches]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.order - b.order)
+    .slice(-limit);
+}
+
+function splitPassRecord(matches) {
+  return {
+    noPass: summarizeMatches(matches.filter((match) => !hasAnyPass(match))),
+    anyPass: summarizeMatches(matches.filter(hasAnyPass))
+  };
+}
+
+function hasAnyPass(match) {
+  return !["none", false, "false", undefined, null, ""].includes(match.myPassed)
+    || !["none", false, "false", undefined, null, ""].includes(match.opponentPassed);
+}
+
+function sortCrossRows(rows, sortKey) {
+  return [...rows].sort((a, b) => {
+    if (sortKey === "low") return a.winRate - b.winRate || b.total - a.total || a.name.localeCompare(b.name, "ja");
+    if (sortKey === "high") return b.winRate - a.winRate || b.total - a.total || a.name.localeCompare(b.name, "ja");
+    return b.total - a.total || b.winRate - a.winRate || a.name.localeCompare(b.name, "ja");
+  });
+}
+
 function deleteDeck(deckId) {
   const sessionIds = new Set(sessionsForDeck(deckId).map((session) => session.id));
   state.decks = state.decks.filter((deck) => deck.id !== deckId);
@@ -350,11 +407,16 @@ function renderSummary() {
   const deck = getDeck(selectedDeckId);
   const environments = selectedDeckId ? environmentsForDeck(selectedDeckId) : [];
   const selectedEnvironment = route.environment && environments.includes(route.environment) ? route.environment : "";
-  const matches = selectedDeckId ? matchesForDeckInEnvironment(selectedDeckId, selectedEnvironment) : state.matches;
+  const stores = selectedDeckId ? storesForDeck(selectedDeckId, selectedEnvironment) : [];
+  const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
+  const selectedPeriod = ["all", "10", "20", "30"].includes(route.period) ? route.period : "all";
+  const selectedPivot = ["opponentDeck", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
+  const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
+  const baseMatches = selectedDeckId ? analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore) : enrichMatches(state.matches);
+  const matches = applyPeriod(baseMatches, selectedPeriod);
   const summary = summarizeMatches(matches);
-  const opponentRows = getOpponentTurnBreakdown(matches);
-  const insights = getAnalysisInsights(matches);
-  const passGap = Math.round((insights.passRecord.noPass.winRate - insights.passRecord.anyPass.winRate) * 10) / 10;
+  const passRecord = splitPassRecord(matches);
+  const rows = sortCrossRows(getCrossBreakdown(matches, selectedPivot), selectedSort);
 
   view.innerHTML = `
     <div class="deck-tabs" aria-label="分析するデッキ">
@@ -368,10 +430,21 @@ function renderSummary() {
         <button class="${environment === selectedEnvironment ? "active" : ""}" type="button" data-analysis-environment="${escapeHtml(environment)}">${escapeHtml(environment)}</button>
       `).join("")}
     </div>
+    <div class="deck-tabs filter-tabs" aria-label="分析する店舗">
+      <button class="${selectedStore === "" ? "active" : ""}" type="button" data-analysis-store="">全店舗</button>
+      ${stores.map((store) => `
+        <button class="${store === selectedStore ? "active" : ""}" type="button" data-analysis-store="${escapeHtml(store)}">${escapeHtml(store)}</button>
+      `).join("")}
+    </div>
+    <div class="deck-tabs filter-tabs" aria-label="分析する期間">
+      ${[["all", "全期間"], ["10", "直近10戦"], ["20", "直近20戦"], ["30", "直近30戦"]].map(([value, label]) => `
+        <button class="${value === selectedPeriod ? "active" : ""}" type="button" data-analysis-period="${value}">${label}</button>
+      `).join("")}
+    </div>
 
     <section class="analysis-hero">
       <div>
-        <span class="label">${escapeHtml(deck?.name || "全体")}${selectedEnvironment ? ` / ${escapeHtml(selectedEnvironment)}` : ""}</span>
+        <span class="label">${escapeHtml(deck?.name || "全体")}${selectedEnvironment ? ` / ${escapeHtml(selectedEnvironment)}` : ""}${selectedStore ? ` / ${escapeHtml(selectedStore)}` : ""}</span>
         <strong>${summary.winRate}%</strong>
         <small>${summary.wins}勝 ${summary.losses}敗 ${summary.draws || 0}分 / ${summary.total}戦</small>
       </div>
@@ -381,23 +454,41 @@ function renderSummary() {
       </div>
     </section>
 
-    <section class="focus-panel">
-      <h2>次に見るところ</h2>
-      <div class="focus-grid">
-        ${focusCard("苦手対面", insights.worstMatchup ? `${insights.worstMatchup.name} ${insights.worstMatchup.winRate}%` : "記録待ち", insights.worstMatchup ? `${insights.worstMatchup.wins}-${insights.worstMatchup.losses} / ${insights.worstMatchup.total}戦` : "相手デッキを記録すると表示")}
-        ${focusCard("先後差", `${turnLabel(insights.turnGap.stronger)}+${insights.turnGap.gap}%`, `${turnLabel(insights.turnGap.weaker)}時のプランを確認`)}
-        ${focusCard("パス影響", `${passGap >= 0 ? "+" : ""}${passGap}%`, `パス無 ${insights.passRecord.noPass.winRate}% / パス有 ${insights.passRecord.anyPass.winRate}%`)}
+    <section class="breakdown-panel">
+      <h2>内訳</h2>
+      <div class="breakdown-grid">
+        ${breakdownCard("総合", recordCompact(summary), `${summary.winRate}%`)}
+        ${breakdownCard("先攻", turnRecordText(summary.first), `${summary.first.winRate}%`)}
+        ${breakdownCard("後攻", turnRecordText(summary.second), `${summary.second.winRate}%`)}
+        ${breakdownCard("パス無", turnRecordText(passRecord.noPass), `${passRecord.noPass.winRate}%`)}
+        ${breakdownCard("パス有", turnRecordText(passRecord.anyPass), `${passRecord.anyPass.winRate}%`)}
       </div>
     </section>
 
-    <h2 class="section-title tight-title">相手デッキ別</h2>
+    <div class="analysis-toolbar">
+      <h2 class="section-title tight-title">クロス集計</h2>
+      <select data-analysis-sort aria-label="並び替え">
+        ${optionTags([["total", "試合数順"], ["low", "勝率低い順"], ["high", "勝率高い順"]], selectedSort)}
+      </select>
+    </div>
+    <div class="deck-tabs filter-tabs" aria-label="集計軸">
+      ${[
+        ["opponentDeck", "相手デッキ"],
+        ["environment", "環境"],
+        ["store", "店舗"],
+        ["opponentPlayer", "プレイヤー"]
+      ].map(([value, label]) => `
+        <button class="${value === selectedPivot ? "active" : ""}" type="button" data-analysis-pivot="${value}">${label}</button>
+      `).join("")}
+    </div>
     <div class="matchup-list">
-      ${opponentRows.map((row) => `
+      ${rows.map((row) => `
         <details class="matchup-row">
           <summary>
             <div>
               <strong>${escapeHtml(row.name)}</strong>
               <span>${row.wins}勝 ${row.losses}敗 ${row.draws}分 / ${row.total}戦 ${sampleLabel(row.total)}</span>
+              <span>先 ${recordCompact(row.first)} / 後 ${recordCompact(row.second)}</span>
             </div>
             <div class="matchup-rate">
               <b>${row.winRate}%</b>
@@ -407,9 +498,11 @@ function renderSummary() {
           <div class="matchup-detail">
             <span>先攻 ${turnRecordText(row.first)}</span>
             <span>後攻 ${turnRecordText(row.second)}</span>
+            <span>パス無 ${turnRecordText(row.noPass)}</span>
+            <span>パス有 ${turnRecordText(row.anyPass)}</span>
           </div>
         </details>
-      `).join("") || `<div class="empty-card">相手デッキを記録すると、苦手対面が見えてきます</div>`}
+      `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
     </div>
   `;
 }
@@ -510,6 +603,19 @@ function rootNavName() {
   if (route.name === "session") return "sessions";
   if (route.name === "playerDetail") return "players";
   return route.name;
+}
+
+function analysisRoute(overrides = {}) {
+  return {
+    name: "summary",
+    deckId: route.deckId || state.decks[0]?.id,
+    environment: route.environment || "",
+    store: route.store || "",
+    period: route.period || "all",
+    pivot: route.pivot || "opponentDeck",
+    sort: route.sort || "total",
+    ...overrides
+  };
 }
 
 function openDialog(mode, targetId = null) {
@@ -678,13 +784,24 @@ view.addEventListener("click", (event) => {
   const editSessionButton = event.target.closest("[data-edit-session]");
   const analysisDeckButton = event.target.closest("[data-analysis-deck]");
   const analysisEnvironmentButton = event.target.closest("[data-analysis-environment]");
+  const analysisStoreButton = event.target.closest("[data-analysis-store]");
+  const analysisPeriodButton = event.target.closest("[data-analysis-period]");
+  const analysisPivotButton = event.target.closest("[data-analysis-pivot]");
   if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck });
   if (sessionButton) setRoute({ name: "session", sessionId: sessionButton.dataset.openSession });
   if (playerButton) setRoute({ name: "playerDetail", playerName: playerButton.dataset.openPlayer });
   if (editButton) openDialog("match", editButton.dataset.editMatch);
   if (editSessionButton) openDialog("session", editSessionButton.dataset.editSession);
-  if (analysisDeckButton) setRoute({ name: "summary", deckId: analysisDeckButton.dataset.analysisDeck });
-  if (analysisEnvironmentButton) setRoute({ name: "summary", deckId: route.deckId || state.decks[0]?.id, environment: analysisEnvironmentButton.dataset.analysisEnvironment });
+  if (analysisDeckButton) setRoute(analysisRoute({ deckId: analysisDeckButton.dataset.analysisDeck, environment: "", store: "" }));
+  if (analysisEnvironmentButton) setRoute(analysisRoute({ environment: analysisEnvironmentButton.dataset.analysisEnvironment, store: "" }));
+  if (analysisStoreButton) setRoute(analysisRoute({ store: analysisStoreButton.dataset.analysisStore }));
+  if (analysisPeriodButton) setRoute(analysisRoute({ period: analysisPeriodButton.dataset.analysisPeriod }));
+  if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot }));
+});
+
+view.addEventListener("change", (event) => {
+  const sortSelect = event.target.closest("[data-analysis-sort]");
+  if (sortSelect) setRoute(analysisRoute({ sort: sortSelect.value }));
 });
 
 dialogFields.addEventListener("click", (event) => {
@@ -826,22 +943,24 @@ function addEnvironment(environment) {
   state.environments = uniqueValues([...(state.environments || []), environment]);
 }
 
-function focusCard(label, value, note) {
+function breakdownCard(label, record, rateValue) {
   return `
-    <article class="focus-card">
+    <article class="breakdown-card">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value)}</strong>
-      <small>${escapeHtml(note)}</small>
+      <strong>${escapeHtml(rateValue)}</strong>
+      <small>${escapeHtml(record)}</small>
     </article>
   `;
 }
 
-function turnLabel(value) {
-  return value === "first" ? "先攻" : "後攻";
+function recordCompact(record) {
+  const losses = "losses" in record ? record.losses : record.total - record.wins;
+  const draws = record.draws || 0;
+  return draws ? `${record.wins}-${losses}-${draws}` : `${record.wins}-${losses}`;
 }
 
 function turnRecordText(record) {
-  return `${record.wins}-${record.total - record.wins} / ${record.winRate}%`;
+  return `${recordCompact(record)} / ${record.winRate}%`;
 }
 
 function sampleLabel(total) {

@@ -103,6 +103,19 @@ export function getOpponentTurnBreakdown(matches = []) {
   });
 }
 
+export function getCrossBreakdown(matches = [], key = "opponentDeck") {
+  return groupedBreakdown(matches, key).map((row) => {
+    const rowMatches = matches.filter((match) => (match[key]?.trim() || "未設定") === row.name);
+    return {
+      ...row,
+      first: tally(rowMatches, (match) => match.firstPlayer === "first"),
+      second: tally(rowMatches, (match) => match.firstPlayer === "second"),
+      noPass: tally(rowMatches, (match) => !hasAnyPass(match)),
+      anyPass: tally(rowMatches, hasAnyPass)
+    };
+  });
+}
+
 export function summarizeDecks(decks = [], sessions = [], matches = []) {
   return decks.map((deck) => {
     const deckSessions = sessions.filter((session) => session.deckId === deck.id);

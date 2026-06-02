@@ -5,6 +5,7 @@ import {
   getOpponentBreakdown,
   getOpponentTurnBreakdown,
   getAnalysisInsights,
+  getCrossBreakdown,
   getPlayerBreakdown,
   getPlayerRecord,
   getRpsBreakdown,
@@ -246,6 +247,47 @@ describe("session and player analytics", () => {
         winRate: 0,
         first: { total: 1, wins: 0, winRate: 0 },
         second: { total: 0, wins: 0, winRate: 0 }
+      }
+    ]);
+  });
+
+  it("builds cross breakdown rows with turn and pass splits", () => {
+    assert.deepEqual(getCrossBreakdown(sessionMatches, "opponentDeck"), [
+      {
+        name: "婚活警視庁",
+        total: 2,
+        wins: 2,
+        losses: 0,
+        draws: 0,
+        winRate: 100,
+        first: { total: 1, wins: 1, winRate: 100 },
+        second: { total: 1, wins: 1, winRate: 100 },
+        noPass: { total: 1, wins: 1, winRate: 100 },
+        anyPass: { total: 1, wins: 1, winRate: 100 }
+      },
+      {
+        name: "白黄王冠",
+        total: 1,
+        wins: 0,
+        losses: 1,
+        draws: 0,
+        winRate: 0,
+        first: { total: 0, wins: 0, winRate: 0 },
+        second: { total: 1, wins: 0, winRate: 0 },
+        noPass: { total: 0, wins: 0, winRate: 0 },
+        anyPass: { total: 1, wins: 0, winRate: 0 }
+      },
+      {
+        name: "緑服部",
+        total: 1,
+        wins: 0,
+        losses: 0,
+        draws: 1,
+        winRate: 0,
+        first: { total: 1, wins: 0, winRate: 0 },
+        second: { total: 0, wins: 0, winRate: 0 },
+        noPass: { total: 1, wins: 0, winRate: 0 },
+        anyPass: { total: 0, wins: 0, winRate: 0 }
       }
     ]);
   });

@@ -198,6 +198,10 @@ button {
   color: var(--text);
 }
 
+.filter-tabs {
+  margin-bottom: 8px;
+}
+
 .analysis-hero {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -238,7 +242,7 @@ button {
   font-weight: 900;
 }
 
-.focus-panel {
+.breakdown-panel {
   margin-top: 14px;
   padding: 14px;
   border-radius: 22px;
@@ -246,46 +250,62 @@ button {
   box-shadow: var(--shadow);
 }
 
-.focus-panel h2 {
+.breakdown-panel h2 {
   margin: 0 0 10px;
   font-size: 1rem;
 }
 
-.focus-grid {
-  display: flex;
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(112px, 1fr));
   gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.focus-grid::-webkit-scrollbar {
+.breakdown-grid::-webkit-scrollbar {
   display: none;
 }
 
-.focus-card {
-  flex: 0 0 168px;
+.breakdown-card {
   display: grid;
   gap: 4px;
   align-content: start;
-  min-height: 94px;
+  min-height: 76px;
   padding: 10px;
   border-radius: 14px;
   background: #17141d;
 }
 
-.focus-card span {
+.breakdown-card span {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 900;
 }
 
-.focus-card strong {
+.breakdown-card strong {
   font-size: 1.05rem;
 }
 
-.focus-card small {
+.breakdown-card small {
   color: var(--muted);
   font-weight: 800;
+}
+
+.analysis-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-toolbar select {
+  width: auto;
+  min-height: 38px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
 .session-edit-button {
@@ -348,13 +368,13 @@ button {
 }
 
 .matchup-detail {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   padding-top: 10px;
 }
 
 .matchup-detail span {
-  flex: 1;
   margin: 0;
   padding: 8px;
   border-radius: 10px;
