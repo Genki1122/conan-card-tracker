@@ -1,0 +1,18 @@
+{
+  "name": "CONAN CARD Tracker",
+  "short_name": "対戦記録",
+  "description": "コナンカードゲームのデッキ別・セッション別・プレイヤー別対戦記録",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#100d15",
+  "theme_color": "#1d1b24",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

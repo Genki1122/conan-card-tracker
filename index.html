@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CONAN CARD Tracker</title>
+    <meta name="theme-color" content="#1d1b24" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="コナン対戦記録" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23100d15'/%3E%3Cpath d='M18 15h28v8H27v7h16v8H27v3h20v8H18z' fill='%23c9b5ff'/%3E%3C/svg%3E" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="phone-shell">
+      <header class="top-bar">
+        <button id="backButton" class="icon-button" type="button" aria-label="戻る">‹</button>
+        <h1 id="screenTitle">デッキ</h1>
+        <button id="moreButton" class="icon-button" type="button" aria-label="メニュー">⋯</button>
+      </header>
+
+      <section id="appView" class="screen"></section>
+
+      <button id="fabButton" class="fab" type="button" aria-label="追加">＋</button>
+
+      <nav class="bottom-nav" aria-label="メイン">
+        <button class="nav-button active" type="button" data-nav="decks">
+          <span>⌂</span>
+          <small>デッキ</small>
+        </button>
+        <button class="nav-button" type="button" data-nav="summary">
+          <span>◉</span>
+          <small>分析</small>
+        </button>
+        <button class="nav-button" type="button" data-nav="players">
+          <span>⌕</span>
+          <small>プレイヤー</small>
+        </button>
+        <button class="nav-button" type="button" data-nav="sessions">
+          <span>▣</span>
+          <small>大会</small>
+        </button>
+      </nav>
+    </main>
+
+    <dialog id="entryDialog" class="sheet">
+      <form id="entryForm" method="dialog">
+        <div class="sheet-head">
+          <div>
+            <p id="dialogKicker">追加</p>
+            <h2 id="dialogTitle">登録</h2>
+          </div>
+          <button value="cancel" class="icon-button" type="submit" formnovalidate>×</button>
+        </div>
+        <div id="dialogFields" class="sheet-fields"></div>
+        <button id="dialogSubmit" class="primary-button" value="default" type="submit">保存</button>
+      </form>
+    </dialog>
+
+    <datalist id="opponentDeckSuggestions"></datalist>
+    <datalist id="playerSuggestions"></datalist>
+    <datalist id="sessionNameSuggestions"></datalist>
+    <datalist id="environmentSuggestions"></datalist>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
