@@ -832,6 +832,21 @@ label {
   background: #17141d;
 }
 
+.danger-zone {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 77, 111, 0.44);
+  border-radius: 14px;
+  background: rgba(158, 46, 68, 0.14);
+}
+
+.danger-zone span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .environment-chip-list {
   display: flex;
   flex-wrap: wrap;
@@ -904,8 +919,10 @@ textarea {
 }
 
 .danger-button {
-  border: 0;
-  background: transparent;
+  min-height: 44px;
+  border: 1px solid rgba(255, 77, 111, 0.62);
+  border-radius: 14px;
+  background: rgba(158, 46, 68, 0.22);
   color: #ff8fa3;
   font-weight: 900;
   cursor: pointer;

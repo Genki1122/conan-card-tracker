@@ -195,6 +195,18 @@ function matchesForDeck(deckId) {
   return state.matches.filter((match) => ids.has(match.sessionId));
 }
 
+function deleteDeck(deckId) {
+  const sessionIds = new Set(sessionsForDeck(deckId).map((session) => session.id));
+  state.decks = state.decks.filter((deck) => deck.id !== deckId);
+  state.sessions = state.sessions.filter((session) => session.deckId !== deckId);
+  state.matches = state.matches.filter((match) => !sessionIds.has(match.sessionId));
+}
+
+function deleteSession(sessionId) {
+  state.sessions = state.sessions.filter((session) => session.id !== sessionId);
+  state.matches = state.matches.filter((match) => match.sessionId !== sessionId);
+}
+
 function matchesForDeckInEnvironment(deckId, environment) {
   const sessions = sessionsForDeck(deckId).filter((session) => !environment || session.environment === environment);
   const ids = new Set(sessions.map((session) => session.id));
@@ -516,10 +528,12 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "menu") {
+    const pageAction = routeActionMarkup();
     dialogKicker.textContent = "Data";
     dialogTitle.textContent = "データメニュー";
     dialogSubmit.hidden = true;
     dialogFields.innerHTML = `
+      ${pageAction}
       <div class="menu-note">
         <strong>自動保存中</strong>
         <span>入力した内容はこの端末のブラウザに保存されています。</span>
@@ -674,6 +688,38 @@ view.addEventListener("click", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  const deleteDeckButton = event.target.closest("[data-delete-current-deck]");
+  if (deleteDeckButton) {
+    const deck = getDeck(deleteDeckButton.dataset.deleteCurrentDeck);
+    if (!deck) return;
+    const sessionCount = sessionsForDeck(deck.id).length;
+    const matchCount = matchesForDeck(deck.id).length;
+    const confirmed = confirm(`「${deck.name}」を削除しますか？\n関連する${sessionCount}セッション、${matchCount}試合も削除されます。`);
+    if (!confirmed) return;
+    deleteDeck(deck.id);
+    saveState();
+    dialog.close();
+    route = { name: "decks" };
+    render();
+    return;
+  }
+
+  const deleteSessionButton = event.target.closest("[data-delete-current-session]");
+  if (deleteSessionButton) {
+    const session = getSession(deleteSessionButton.dataset.deleteCurrentSession);
+    if (!session) return;
+    const matchCount = matchesForSession(session.id).length;
+    const deckId = session.deckId;
+    const confirmed = confirm(`「${session.name}」を削除しますか？\nこのセッションの${matchCount}試合も削除されます。`);
+    if (!confirmed) return;
+    deleteSession(session.id);
+    saveState();
+    dialog.close();
+    route = getDeck(deckId) ? { name: "deckDetail", deckId } : { name: "sessions" };
+    render();
+    return;
+  }
+
   if (event.target.closest("[data-import-json]")) {
     const input = dialogFields.querySelector("textarea[name='importJson']");
     try {
@@ -812,4 +858,35 @@ function registerServiceWorker() {
       // PWA support is optional; the app still works in a normal browser tab.
     });
   });
+}
+
+function routeActionMarkup() {
+  if (route.name === "deckDetail") {
+    const deck = getDeck(route.deckId);
+    if (!deck) return "";
+    const sessionCount = sessionsForDeck(deck.id).length;
+    const matchCount = matchesForDeck(deck.id).length;
+    return `
+      <div class="danger-zone">
+        <strong>このデッキ</strong>
+        <span>${sessionCount}セッション / ${matchCount}試合が紐づいています。</span>
+        <button class="danger-button" type="button" data-delete-current-deck="${deck.id}">デッキを削除</button>
+      </div>
+    `;
+  }
+
+  if (route.name === "session") {
+    const session = getSession(route.sessionId);
+    if (!session) return "";
+    const matchCount = matchesForSession(session.id).length;
+    return `
+      <div class="danger-zone">
+        <strong>このセッション</strong>
+        <span>${matchCount}試合が紐づいています。</span>
+        <button class="danger-button" type="button" data-delete-current-session="${session.id}">セッションを削除</button>
+      </div>
+    `;
+  }
+
+  return "";
 }
