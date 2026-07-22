@@ -32,6 +32,7 @@ const legacyStorageKey = "conan-card-match-casebook";
 
 const view = document.querySelector("#appView");
 const title = document.querySelector("#screenTitle");
+const topBar = document.querySelector(".top-bar");
 const syncStatusLabel = document.querySelector("#syncStatus");
 const backButton = document.querySelector("#backButton");
 const fabButton = document.querySelector("#fabButton");
@@ -846,7 +847,7 @@ function renderSessions() {
           <button class="list-card compact-session-card" type="button" data-open-session="${session.id}">
             <span class="session-card-copy">
               <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong></span>
-              <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(deck?.name || "未設定")}</span><span>${matchesForSession(session.id).length}試合</span></span>
+              <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(deck?.name || "未設定")}</span></span>
             </span>
             ${sessionCardStatus(session, summary)}
           </button>
@@ -898,8 +899,10 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
+  const hasBackButton = ["deckDetail", "session", "playerDetail", "storeDetail"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
-  backButton.style.visibility = ["deckDetail", "session", "playerDetail", "storeDetail"].includes(route.name) ? "visible" : "hidden";
+  topBar.classList.toggle("root-header", !hasBackButton);
+  backButton.style.visibility = hasBackButton ? "visible" : "hidden";
   fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
