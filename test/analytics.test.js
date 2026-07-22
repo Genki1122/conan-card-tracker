@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   canWinRandomPrize,
+  filterMatchesByEnvironment,
   filterMatchesByMonth,
   filterDecksByArchived,
   formatRecordDate,
@@ -214,6 +215,16 @@ describe("player quick lookup analytics", () => {
       ["佐藤さん", "田中さん"]
     );
     assert.deepEqual(getPlayerOverviewsByMonth(lookupMatches, "2026-06"), []);
+  });
+
+  it("filters enriched matches by environment", () => {
+    const matches = [
+      { id: "current", environment: "9弾環境" },
+      { id: "previous", environment: "8弾環境" },
+      { id: "unset" }
+    ];
+    assert.deepEqual(filterMatchesByEnvironment(matches, "9弾環境").map((match) => match.id), ["current"]);
+    assert.deepEqual(filterMatchesByEnvironment(matches).map((match) => match.id), ["current", "previous", "unset"]);
   });
 });
 

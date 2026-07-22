@@ -132,6 +132,11 @@ export function filterMatchesByMonth(matches = [], month = "") {
   return matches.filter((match) => String(match.date || "").slice(0, 7) === month);
 }
 
+export function filterMatchesByEnvironment(matches = [], environment = "") {
+  if (!environment) return matches;
+  return matches.filter((match) => String(match.environment || "未設定") === environment);
+}
+
 export function filterDecksByArchived(decks = [], archived = false) {
   return decks.filter((deck) => Boolean(deck.archived) === archived);
 }

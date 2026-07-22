@@ -58,8 +58,8 @@ button {
   display: grid;
   grid-template-columns: 48px 1fr 48px;
   align-items: center;
-  min-height: 86px;
-  padding: 18px 18px 12px;
+  min-height: 74px;
+  padding: 10px 16px 8px;
   background: var(--bar);
   border-bottom: 1px solid #17131c;
 }
@@ -74,6 +74,9 @@ button {
 }
 
 .title-stack {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -82,8 +85,7 @@ button {
 }
 
 #syncStatus {
-  display: block;
-  margin-top: 3px;
+  flex: 0 0 auto;
   color: var(--dim);
   font-size: 0.62rem;
   font-weight: 900;
@@ -108,8 +110,8 @@ button {
 }
 
 .screen {
-  min-height: calc(100vh - 164px);
-  padding: 18px 18px 110px;
+  min-height: calc(100vh - 150px);
+  padding: 16px 18px 170px;
 }
 
 .summary-card,
@@ -184,9 +186,9 @@ button {
   grid-template-columns: auto auto minmax(0, 1fr);
   gap: 16px;
   align-items: center;
-  min-height: 72px;
+  min-height: 64px;
   margin-bottom: 10px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 14px;
   background: var(--card);
   box-shadow: var(--shadow);
@@ -215,6 +217,13 @@ button {
   flex-wrap: wrap;
   gap: 4px 9px;
   margin: 0;
+}
+
+.record-strip p span:first-child {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #17141d;
+  color: var(--text);
 }
 
 .record-strip > i {
@@ -809,17 +818,17 @@ button {
 
 .fab {
   position: fixed;
-  right: max(22px, calc((100vw - 480px) / 2 + 22px));
-  bottom: 92px;
+  right: max(16px, calc((100vw - 480px) / 2 + 16px));
+  bottom: 88px;
   z-index: 6;
-  width: 68px;
-  height: 68px;
+  width: 58px;
+  height: 58px;
   border: 0;
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--purple-2);
   box-shadow: var(--shadow);
   color: #fff;
-  font-size: 2.5rem;
+  font-size: 2.1rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -1281,6 +1290,19 @@ textarea {
   height: 38px;
 }
 
+.session-card-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-card-status .result-chip-row {
+  justify-content: flex-end;
+  max-width: 76px;
+}
+
 .session-compact-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1374,6 +1396,30 @@ textarea {
   font-size: 0.66rem;
   font-weight: 900;
   white-space: nowrap;
+}
+
+.result-chip.champion {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #241b07;
+}
+
+.result-chip.second {
+  border-color: #bfc3cf;
+  background: rgba(191, 195, 207, 0.11);
+  color: #e8ebf2;
+}
+
+.result-chip.top4 {
+  border-color: #b47a56;
+  background: rgba(180, 122, 86, 0.11);
+  color: #e9b894;
+}
+
+.result-chip.random {
+  border-color: rgba(157, 123, 255, 0.72);
+  background: rgba(109, 77, 215, 0.18);
+  color: #d9ccff;
 }
 
 .analysis-primary-filters {
@@ -1535,16 +1581,17 @@ textarea {
 
 .store-summary {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 8px;
-  align-items: end;
-  padding: 14px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 12px;
   border-radius: 14px;
   background: var(--card);
 }
 
 .store-summary > strong {
-  font-size: 1.8rem;
+  font-size: 1.5rem;
 }
 
 .store-summary > span {
@@ -1553,8 +1600,7 @@ textarea {
 }
 
 .store-summary .method-chips {
-  grid-column: 1 / -1;
-  margin-top: 8px;
+  justify-content: flex-end;
 }
 
 .staff-rps-card {
@@ -1601,25 +1647,42 @@ textarea {
   font-weight: 900;
 }
 
-.player-period-filter {
+.player-context-filters {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
   margin: -2px 0 10px;
 }
 
-.player-period-filter span {
+.player-context-filters label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.player-context-filters span {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
 }
 
-.player-period-filter select {
+.player-context-filters select {
+  min-width: 0;
   min-height: 36px;
   padding: 5px 9px;
   border-radius: 10px;
   font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.store-inline-empty {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 0.72rem;
   font-weight: 900;
 }
 
@@ -1854,5 +1917,16 @@ textarea {
     margin-block: 20px;
     border: 1px solid #2b2634;
     border-radius: 34px;
+  }
+}
+
+@media (max-width: 350px) {
+  #syncStatus {
+    width: 7px;
+    height: 7px;
+    overflow: hidden;
+    border-radius: 50%;
+    background: currentColor;
+    font-size: 0;
   }
 }

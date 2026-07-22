@@ -1,10 +1,11 @@
 import {
   canWinRandomPrize,
   filterDecksByArchived,
+  filterMatchesByEnvironment,
   filterMatchesByMonth,
   formatRecordDate,
   getCrossBreakdown,
-  getPlayerOverviewsByMonth,
+  getPlayerOverviews,
   getPlayerRecord,
   getRecordedRpsBreakdown,
   getStaffRpsBreakdown,
@@ -75,7 +76,7 @@ const passLabels = {
   true: "有"
 };
 const placementLabels = { champion: "優勝", second: "2位", top4: "ベスト4", other: "その他" };
-const prizeMethodLabels = { rps: "じゃんけん", roulette: "ルーレット", other: "その他" };
+const prizeMethodLabels = { rps: "じゃんけん", roulette: "ルーレット", other: "その他", unrecorded: "未記録" };
 
 function loadState() {
   try {
@@ -441,9 +442,15 @@ function deckRecency(deck) {
 
 function sessionResultChips(session) {
   const chips = [];
-  if (["champion", "second", "top4"].includes(session.placement)) chips.push(placementLabels[session.placement]);
-  if (session.randomPrizeWon) chips.push("ランダム");
-  return chips.map((label) => `<span class="result-chip">${label}</span>`).join("");
+  if (["champion", "second", "top4"].includes(session.placement)) {
+    chips.push({ label: placementLabels[session.placement], tone: session.placement });
+  }
+  if (session.randomPrizeWon) chips.push({ label: "ランダム", tone: "random" });
+  return chips.map(({ label, tone }) => `<span class="result-chip ${tone}">${label}</span>`).join("");
+}
+
+function sessionCardStatus(session, summary) {
+  return `<span class="session-card-status"><span class="result-chip-row">${sessionResultChips(session)}</span><span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span></span>`;
 }
 
 function sessionsForStore(storeName) {
@@ -570,10 +577,10 @@ function renderDeckDetail(deckId) {
         return `
           <button class="list-card compact-session-card" type="button" data-open-session="${session.id}">
             <span class="session-card-copy">
-              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong><span class="result-chip-row">${sessionResultChips(session)}</span></span>
+              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong></span>
               <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${count}試合</span></span>
             </span>
-            <span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span>
+            ${sessionCardStatus(session, summary)}
           </button>
         `;
       }).join("") || `<div class="empty-card">このデッキのセッションを登録しましょう</div>`}
@@ -742,7 +749,9 @@ function renderPlayers() {
   const selected = route.playerName;
   const months = analysisMonths();
   const selectedMonth = route.playerMonth && months.includes(route.playerMonth) ? route.playerMonth : "";
-  const periodMatches = filterMatchesByMonth(enrichMatches(state.matches), selectedMonth);
+  const environments = environmentOptions();
+  const selectedEnvironment = route.playerEnvironment && environments.includes(route.playerEnvironment) ? route.playerEnvironment : "";
+  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(enrichMatches(state.matches), selectedMonth), selectedEnvironment);
 
   if (selected) {
     title.textContent = selected;
@@ -753,7 +762,7 @@ function renderPlayers() {
     const recentDecks = uniqueValues(enriched.map((match) => match.opponentDeck)).slice(0, 3);
     const deckRows = getCrossBreakdown(enriched, "opponentDeck");
     view.innerHTML = `
-      <div class="player-detail-period"><span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}</span><strong>${record.total}戦</strong></div>
+      <div class="player-detail-period"><span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}</span><strong>${record.total}戦</strong></div>
       ${summaryCard(record, [`最終 ${formatDate(latest?.date)}`, `${record.total}戦`], true)}
       <div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>
       <section class="player-first-look">
@@ -761,7 +770,7 @@ function renderPlayers() {
         <div class="recent-player-decks"><strong>最近の相手デッキ</strong><span>${recentDecks.map((name) => `<i>${escapeHtml(name)}</i>`).join("") || "記録なし"}</span></div>
       </section>
       <h2 class="section-title">相手デッキ別</h2>
-      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("") || `<div><strong>記録なし</strong><span>期間を変更してください</span></div>`}</div>
+      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("") || `<div><strong>記録なし</strong><span>期間または環境を変更してください</span></div>`}</div>
       <h2 class="section-title">${escapeHtml(selected)}との履歴</h2>
       <div class="list-stack player-history-list">
         ${enriched.map((match) => {
@@ -784,7 +793,7 @@ function renderPlayers() {
   const query = String(route.playerQuery || "").trim().toLocaleLowerCase("ja");
   const sortKey = ["latest", "matches", "winRate", "name"].includes(route.playerSort) ? route.playerSort : "latest";
   const direction = route.playerDirection === "asc" ? "asc" : "desc";
-  const overviewRows = getPlayerOverviewsByMonth(enrichMatches(state.matches), selectedMonth);
+  const overviewRows = getPlayerOverviews(periodMatches);
   const rows = sortPlayerOverviews(overviewRows.filter((row) => row.name.toLocaleLowerCase("ja").includes(query)), sortKey, direction);
   view.innerHTML = `
     <div class="player-toolbar">
@@ -792,7 +801,10 @@ function renderPlayers() {
       <select data-player-sort aria-label="並び順">${optionTags([["latest", "最終対戦日"], ["matches", "対戦数"], ["winRate", "勝率"], ["name", "名前"]], sortKey)}</select>
       <button type="button" data-player-direction aria-label="${direction === "desc" ? "降順" : "昇順"}">${direction === "desc" ? "↓" : "↑"}</button>
     </div>
-    <label class="player-period-filter"><span>期間</span><select data-player-month aria-label="期間"><option value="">全期間</option>${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}</select></label>
+    <div class="player-context-filters">
+      <label><span>期間</span><select data-player-month aria-label="期間"><option value="">全期間</option>${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}</select></label>
+      <label><span>環境</span><select data-player-environment aria-label="環境"><option value="">全環境</option>${environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === selectedEnvironment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
+    </div>
     <div class="list-stack player-list">
       ${rows.map((row) => `
         <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
@@ -803,7 +815,7 @@ function renderPlayers() {
           </span>
           <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
         </button>
-      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : selectedMonth ? "この期間のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
+      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : selectedMonth || selectedEnvironment ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
     </div>
   `;
 }
@@ -828,10 +840,10 @@ function renderSessions() {
         return `
           <button class="list-card compact-session-card" type="button" data-open-session="${session.id}">
             <span class="session-card-copy">
-              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong><span class="result-chip-row">${sessionResultChips(session)}</span></span>
+              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong></span>
               <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(deck?.name || "未設定")}</span><span>${matchesForSession(session.id).length}試合</span></span>
             </span>
-            <span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span>
+            ${sessionCardStatus(session, summary)}
           </button>
         `;
       }).join("") || `<div class="empty-card">＋ からセッションを登録しましょう</div>`}</div>`}
@@ -854,19 +866,22 @@ function renderStoreList() {
 function renderStoreDetail(storeName) {
   const sessions = sessionsForStore(storeName);
   const breakdown = getStaffRpsBreakdown(sessions);
+  const recordedHands = breakdown.filter((hand) => hand.total > 0);
+  const hasRpsArchive = sessions.some((session) => session.randomPrizeMethod === "rps");
   const methodCounts = Object.entries(sessions.reduce((counts, session) => {
-    if (session.randomPrizeMethod) counts[session.randomPrizeMethod] = (counts[session.randomPrizeMethod] || 0) + 1;
+    const method = session.randomPrizeMethod || "unrecorded";
+    counts[method] = (counts[method] || 0) + 1;
     return counts;
   }, {}));
   title.textContent = storeName;
   view.innerHTML = `
     <section class="store-summary"><strong>${sessions.length}</strong><span>開催記録</span><div class="method-chips">${methodCounts.map(([method, count]) => `<span>${escapeHtml(prizeMethodLabels[method] || method)} ${count}回</span>`).join("") || `<span>方式未記録</span>`}</div></section>
-    <h2 class="section-title">店員の手</h2>
-    <section class="staff-rps-card">${breakdown.map((hand) => staffHandBar(hand)).join("")}</section>
+    ${recordedHands.length ? `<h2 class="section-title">店員の手</h2><section class="staff-rps-card">${recordedHands.map((hand) => staffHandBar(hand)).join("")}</section>` : hasRpsArchive ? `<div class="store-inline-empty">じゃんけんの手は未記録です</div>` : ""}
     <h2 class="section-title">開催履歴</h2>
     <div class="list-stack compact-session-list">${sessions.map((session) => {
       const summary = sessionSummary(session.id);
-      return `<button class="list-card compact-session-card" type="button" data-open-session="${session.id}"><span class="session-card-copy"><span class="session-title-line"><strong class="list-title">${formatDate(session.date)}</strong><span class="result-chip-row">${sessionResultChips(session)}</span></span><span class="list-meta"><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || "方式未記録")}</span><span>${matchesForSession(session.id).length}試合</span></span></span><span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span></button>`;
+      const deck = getDeck(session.deckId);
+      return `<button class="list-card compact-session-card" type="button" data-open-session="${session.id}"><span class="session-card-copy"><span class="session-title-line"><strong class="list-title">${formatDate(session.date)}</strong></span><span class="list-meta"><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || "方式未記録")}</span><span>${escapeHtml(deck?.name || "デッキ未設定")}</span><span>${escapeHtml(session.environment || "環境未設定")}</span></span></span>${sessionCardStatus(session, summary)}</button>`;
     }).join("")}</div>`;
 }
 
@@ -1177,6 +1192,8 @@ view.addEventListener("change", (event) => {
   if (playerSort) setRoute({ ...route, name: "players", playerName: "", playerSort: playerSort.value });
   const playerMonth = event.target.closest("[data-player-month]");
   if (playerMonth) setRoute({ ...route, name: "players", playerName: "", playerMonth: playerMonth.value });
+  const playerEnvironment = event.target.closest("[data-player-environment]");
+  if (playerEnvironment) setRoute({ ...route, name: "players", playerName: "", playerEnvironment: playerEnvironment.value });
 });
 
 view.addEventListener("input", (event) => {
@@ -1415,7 +1432,7 @@ backButton.addEventListener("click", () => {
     if (route.returnStore) setRoute({ name: "storeDetail", storeName: route.returnStore, returnRoute: route.returnAfterStore });
     else setRoute(session ? { name: "deckDetail", deckId: session.deckId } : { name: "sessions" });
   }
-  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "" });
+  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "" });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
 });
 
