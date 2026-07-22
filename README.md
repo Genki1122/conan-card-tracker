@@ -27,11 +27,13 @@ python3 -m http.server 4174
 ## Supabase同期
 
 1. Supabaseでプロジェクトを作成します。
-2. SQL Editorで `supabase/schema.sql` を実行します。
+2. SQL Editorで `supabase/schema.sql` を実行します。プロフィール、同意、管理者権限もこのSQLで作成されます。
 3. Authentication > URL Configurationで、GitHub PagesのURLをSite URLとRedirect URLsに登録します。
 4. Project Settings > APIから `Project URL` と `anon public` keyを控えます。
 5. `src/supabase-config.js`へProject URLとPublishable keyを設定します。
 6. 友人は手引書の「無料でユーザー登録」からメールアドレスを入力します。
+
+`0harry0wilder0@gmail.com` で登録した利用者には `superadmin` が付与され、3点メニューから管理者画面を開けます。管理画面はRLSで保護され、一般利用者からは表示・参照できません。
 
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。
 
@@ -45,5 +47,7 @@ python3 -m http.server 4174
 2. Supabase AuthenticationのSite URLとRedirect URLsへ本番URLを正確に登録します。
 3. 友人は自分のメールアドレスでログインします。
 4. 少人数テストを超えて共有する前に、Authのメール送信上限を確認し、必要ならCustom SMTPを設定します。
+
+日本語メール本文とCustom SMTPの設定項目は `supabase/email-setup.md` にまとめています。SMTPパスワードはGitHubへ保存せず、Supabase Dashboardへ直接入力してください。
 
 Publishable keyはRLSを有効にしたブラウザアプリで公開するためのキーです。Secret keyと`service_role` keyは使用しません。新規利用者向けの空データ開始と利用案内は、一般共有前の対応項目です。

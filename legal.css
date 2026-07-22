@@ -1,0 +1,49 @@
+:root {
+  color-scheme: dark;
+  --bg: #100d15;
+  --card: #222029;
+  --line: #3e3949;
+  --text: #f6f2ff;
+  --muted: #b8b1c6;
+  --purple: #9d7bff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #07060a;
+  color: var(--text);
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+  line-height: 1.75;
+}
+
+main {
+  width: min(100%, 720px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+  background: var(--bg);
+}
+
+a { color: var(--purple); }
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 20px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+h1 { margin: 0 0 6px; font-size: 1.7rem; }
+h2 { margin: 28px 0 8px; font-size: 1.08rem; }
+p, li { color: var(--muted); font-size: 0.92rem; }
+.updated { margin: 0 0 24px; color: var(--muted); font-size: 0.78rem; }
+ul { padding-left: 1.3rem; }
+
+.notice {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}

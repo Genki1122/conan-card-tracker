@@ -16,17 +16,23 @@ import {
   summarizeMatches
 } from "./analytics.js";
 import { stateSummary, statesEqual } from "./sync-state.js";
-import { createInitialState } from "./initial-state.js";
+import { createInitialState, removeLegacyMockState } from "./initial-state.js";
 import {
   accountOnboardingIntent,
-  clearAccountOnboardingUrl
+  clearAccountOnboardingUrl,
+  normalizeUsername,
+  validateUsername
 } from "./onboarding.js";
+import { buildAdminOverview, buildAiTrainingDataset } from "./admin-analytics.js";
 import {
   cloudSnapshot,
   getCloudConfig,
   initializeCloud,
   isCloudConfigured,
+  loadAccountContext,
+  loadAdminData,
   loadCloudState,
+  saveAccountSetup,
   saveCloudConfig,
   saveCloudState,
   signInWithEmail,
@@ -36,6 +42,7 @@ import {
 const storageKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaStorageKey = "conan-card-tracker-sync-meta-v1";
+const termsVersion = "2026-07-22-v1";
 
 const view = document.querySelector("#appView");
 const phoneShell = document.querySelector(".phone-shell");
@@ -76,6 +83,8 @@ let localDirty = Boolean(syncMeta.dirty);
 let accountOnboardingActive = accountOnboardingIntent(window.location.search);
 let cloudConflict = false;
 let pendingRemoteState = null;
+let accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
+let adminState = { loading: false, error: "", data: null, raw: null };
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
@@ -95,14 +104,14 @@ const prizeMethodLabels = { rps: "じゃんけん", roulette: "ルーレット",
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
-    if (saved) return normalizeState(saved);
+    if (saved) return normalizeState(removeLegacyMockState(saved));
   } catch {
     // Ignore malformed local data and fall back to a clean state.
   }
 
   try {
     const legacy = JSON.parse(localStorage.getItem(legacyStorageKey)) || [];
-    if (legacy.length > 0) return migrateLegacyMatches(legacy);
+    if (legacy.length > 0) return normalizeState(removeLegacyMockState(migrateLegacyMatches(legacy)));
   } catch {
     // Ignore old data that cannot be migrated.
   }
@@ -915,15 +924,76 @@ function staffHandBar(hand) {
   return `<div class="staff-hand-row"><div class="staff-hand-head"><strong>${hand.position}手目</strong><span>${hand.total}回</span></div><div class="rps-stack">${hand.rows.map((row) => `<span class="rps-segment ${row.key}" style="width:${row.percentage}%" title="${row.label} ${row.percentage}%"></span>`).join("")}</div><div class="staff-hand-legend">${hand.rows.map((row) => `<span>${row.label} ${row.percentage}%</span>`).join("")}</div></div>`;
 }
 
+function renderAdmin() {
+  title.textContent = "管理者";
+  if (accountContext.role !== "superadmin") {
+    view.innerHTML = `<div class="empty-card">この画面を表示する権限がありません</div>`;
+    return;
+  }
+  if (adminState.loading) {
+    view.innerHTML = `<div class="empty-card">集計データを読み込んでいます</div>`;
+    return;
+  }
+  if (adminState.error) {
+    view.innerHTML = `<div class="empty-card admin-error">${escapeHtml(adminState.error)}<button type="button" data-admin-reload>再読込</button></div>`;
+    return;
+  }
+  if (!adminState.data) {
+    view.innerHTML = `<div class="empty-card">管理データを読み込めませんでした</div>`;
+    return;
+  }
+
+  const overview = adminState.data;
+  view.innerHTML = `
+    <section class="admin-metrics" aria-label="利用状況">
+      ${adminMetric("登録者", overview.users)}
+      ${adminMetric("30日利用", overview.activeUsers30d)}
+      ${adminMetric("総試合", overview.matches)}
+      ${adminMetric("全体勝率", `${overview.winRate}%`)}
+      ${adminMetric("デッキ", overview.decks)}
+      ${adminMetric("大会", overview.sessions)}
+    </section>
+    <div class="admin-heading"><h2>傾向</h2><span>同意済み ${overview.aiEligibleUsers}人</span></div>
+    <section class="admin-trends">
+      ${adminTrend("自分デッキ", overview.myDecks)}
+      ${adminTrend("相手デッキ", overview.opponentDecks)}
+      ${adminTrend("環境", overview.environments, true)}
+    </section>
+    <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
+    <div class="admin-user-list">
+      ${overview.userRows.map((row) => `
+        <article class="admin-user-row">
+          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span></div>
+          <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
+          <i class="${row.consented ? "accepted" : ""}">${row.consented ? "同意済" : "未同意"}</i>
+        </article>
+      `).join("") || `<div class="empty-card">利用者データがありません</div>`}
+    </div>
+  `;
+}
+
+function adminMetric(label, value) {
+  return `<div><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function adminTrend(label, rows, environment = false) {
+  return `<div><strong>${label}</strong>${rows.slice(0, 5).map((row) => `<span><b>${escapeHtml(row.name)}</b><small>${environment ? `${row.matches}戦` : `${row.total}戦・${row.winRate}%`}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>`;
+}
+
+function formatAdminDate(value) {
+  if (!value) return "未記録";
+  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric" }).format(new Date(value));
+}
+
 function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
-  const hasBackButton = ["deckDetail", "session", "playerDetail", "storeDetail"].includes(route.name);
+  const hasBackButton = ["deckDetail", "session", "playerDetail", "storeDetail", "admin"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
   topBar.classList.toggle("root-header", !hasBackButton);
   backButton.style.visibility = hasBackButton ? "visible" : "hidden";
-  fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
+  fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || route.name === "admin" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
@@ -933,6 +1003,7 @@ function render() {
   if (route.name === "players" || route.name === "playerDetail") renderPlayers();
   if (route.name === "sessions") renderSessions();
   if (route.name === "storeDetail") renderStoreDetail(route.storeName);
+  if (route.name === "admin") renderAdmin();
 }
 
 function rootNavName() {
@@ -1181,6 +1252,18 @@ entryForm.addEventListener("submit", (event) => {
 });
 
 view.addEventListener("click", (event) => {
+  if (event.target.closest("[data-admin-reload]")) {
+    loadAdminDashboard();
+    return;
+  }
+  if (event.target.closest("[data-copy-ai-dataset]")) {
+    if (!adminState.raw) return;
+    navigator.clipboard?.writeText(JSON.stringify(buildAiTrainingDataset(adminState.raw), null, 2));
+    const button = event.target.closest("[data-copy-ai-dataset]");
+    button.textContent = "コピー済み";
+    setTimeout(() => { button.textContent = "匿名AIデータをコピー"; }, 1000);
+    return;
+  }
   const deckButton = event.target.closest("[data-open-deck]");
   const sessionButton = event.target.closest("[data-open-session]");
   const playerButton = event.target.closest("[data-open-player]");
@@ -1258,6 +1341,14 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-open-admin]")) {
+    dialog.close();
+    route = { name: "admin" };
+    render();
+    loadAdminDashboard();
+    return;
+  }
+
   const menuPanelButton = event.target.closest("[data-open-menu-panel]");
   if (menuPanelButton) {
     openDialog(menuPanelButton.dataset.openMenuPanel);
@@ -1282,6 +1373,46 @@ dialogFields.addEventListener("click", (event) => {
   if (event.target.closest("[data-cloud-login]")) {
     const button = event.target.closest("[data-cloud-login]");
     const input = dialogFields.querySelector("input[name='cloudEmail']");
+    const usernameInput = dialogFields.querySelector("input[name='cloudUsername']");
+    const consentInput = dialogFields.querySelector("input[name='termsAccepted']");
+    const email = input.value.trim();
+    const username = normalizeUsername(usernameInput?.value);
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      usernameInput.setCustomValidity(usernameError);
+      usernameInput.reportValidity();
+      usernameInput.setCustomValidity("");
+      return;
+    }
+    if (!email) {
+      input.setCustomValidity("メールアドレスを入力してください");
+      input.reportValidity();
+      input.setCustomValidity("");
+      return;
+    }
+    if (!consentInput?.checked) {
+      consentInput.setCustomValidity("利用規約とプライバシーポリシーへの同意が必要です");
+      consentInput.reportValidity();
+      consentInput.setCustomValidity("");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "メール送信中...";
+    signInWithEmail(email, { username, termsVersion })
+      .then(() => {
+        cloudMessage = "メールを送信しました。届いたメール内のリンクを開いてください";
+        openDialog("cloudSettings");
+      })
+      .catch((error) => {
+        cloudMessage = `ログイン失敗: ${error.message}`;
+        openDialog("cloudSettings");
+      });
+    return;
+  }
+
+  if (event.target.closest("[data-cloud-existing-login]")) {
+    const button = event.target.closest("[data-cloud-existing-login]");
+    const input = dialogFields.querySelector("input[name='existingCloudEmail']");
     const email = input.value.trim();
     if (!email) {
       input.setCustomValidity("メールアドレスを入力してください");
@@ -1291,13 +1422,46 @@ dialogFields.addEventListener("click", (event) => {
     }
     button.disabled = true;
     button.textContent = "メール送信中...";
-    signInWithEmail(email)
+    signInWithEmail(email, {}, false)
       .then(() => {
-        cloudMessage = "メールを送信しました。届いたメール内のリンクを開いてください";
+        cloudMessage = "ログイン用メールを送信しました";
         openDialog("cloudSettings");
       })
       .catch((error) => {
         cloudMessage = `ログイン失敗: ${error.message}`;
+        openDialog("cloudSettings");
+      });
+    return;
+  }
+
+  if (event.target.closest("[data-save-account-setup]")) {
+    const button = event.target.closest("[data-save-account-setup]");
+    const usernameInput = dialogFields.querySelector("input[name='accountUsername']");
+    const consentInput = dialogFields.querySelector("input[name='accountTermsAccepted']");
+    const username = normalizeUsername(usernameInput?.value);
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      usernameInput.setCustomValidity(usernameError);
+      usernameInput.reportValidity();
+      usernameInput.setCustomValidity("");
+      return;
+    }
+    if (!consentInput?.checked) {
+      consentInput.setCustomValidity("利用規約とプライバシーポリシーへの同意が必要です");
+      consentInput.reportValidity();
+      consentInput.setCustomValidity("");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "保存中...";
+    saveAccountSetup({ username, termsVersion })
+      .then((context) => {
+        accountContext = context;
+        cloudMessage = "アカウント登録が完了しました";
+        openDialog("cloudSettings");
+      })
+      .catch((error) => {
+        cloudMessage = `登録失敗: ${error.message}`;
         openDialog("cloudSettings");
       });
     return;
@@ -1337,6 +1501,8 @@ dialogFields.addEventListener("click", (event) => {
         saveSyncMeta();
         cloudConflict = false;
         pendingRemoteState = null;
+        accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
+        adminState = { loading: false, error: "", data: null, raw: null };
         cloudMessage = "ログアウトしました";
         openDialog("cloudSettings");
       })
@@ -1484,6 +1650,7 @@ backButton.addEventListener("click", () => {
   }
   if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "" });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
+  if (route.name === "admin") setRoute({ name: "decks" });
 });
 
 navButtons.forEach((button) => {
@@ -1513,7 +1680,7 @@ localStorage.setItem(storageKey, JSON.stringify(state));
 render();
 registerServiceWorker();
 if (accountOnboardingActive) {
-  cloudMessage = "メールアドレスだけで無料登録できます";
+  cloudMessage = "ユーザー名とメールアドレスで無料登録できます";
   openDialog("cloudSettings");
   history.replaceState(null, "", clearAccountOnboardingUrl(window.location.href));
 }
@@ -1604,12 +1771,39 @@ async function refreshCloudSession() {
       cloudStatus = nextStatus;
       rerenderOpenMenu();
     });
-    if (cloudStatus.signedIn) await pullCloudState({ uploadWhenEmpty: true, silent: true });
+    if (cloudStatus.signedIn) {
+      try {
+        accountContext = await loadAccountContext();
+      } catch (error) {
+        accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
+        if (!String(error.message || "").includes("Could not find the table")) {
+          cloudMessage = `アカウント情報の読込失敗: ${error.message}`;
+        }
+      }
+      await pullCloudState({ uploadWhenEmpty: true, silent: true });
+      if (accountContext.schemaReady && !accountContext.termsAccepted) {
+        cloudMessage = "ユーザー名と規約同意を登録してください";
+        openDialog("cloudSettings");
+      }
+    }
     rerenderOpenMenu();
   } catch (error) {
     cloudMessage = `クラウド接続失敗: ${error.message}`;
     rerenderOpenMenu();
   }
+}
+
+async function loadAdminDashboard() {
+  if (accountContext.role !== "superadmin") return;
+  adminState = { loading: true, error: "", data: null, raw: null };
+  if (route.name === "admin") render();
+  try {
+    const raw = await loadAdminData();
+    adminState = { loading: false, error: "", data: buildAdminOverview(raw), raw };
+  } catch (error) {
+    adminState = { loading: false, error: `管理データの読込に失敗しました: ${error.message}`, data: null, raw: null };
+  }
+  if (route.name === "admin") render();
 }
 
 async function pullCloudState(options = {}) {
@@ -1621,6 +1815,18 @@ async function pullCloudState(options = {}) {
     }
     const remote = await loadCloudState();
     if (remote?.data) {
+      const cleanedRemote = removeLegacyMockState(remote.data);
+      if (!statesEqual(remote.data, cleanedRemote)) {
+        state = normalizeState(cleanedRemote);
+        localStorage.setItem(storageKey, JSON.stringify(state));
+        cloudUpdatedAt = remote.updated_at;
+        await pushCloudState({ force: true, silent: true });
+        cloudMessage = "サンプルデータを削除して同期しました";
+        route = validRouteAfterSync(route);
+        render();
+        rerenderOpenMenu();
+        return;
+      }
       const needsChoice = stageRemoteReconciliation(remote);
       if (needsChoice) {
         renderSyncStatus();
@@ -1758,7 +1964,7 @@ applyUpdateButton?.addEventListener("click", () => window.location.reload());
 function cloudMenuMarkup() {
   const config = getCloudConfig();
   const statusText = cloudStatus.signedIn
-    ? cloudStatus.email
+    ? accountContext.username || cloudStatus.email
     : cloudStatus.configured
       ? "未登録 / 未ログイン"
       : "利用できません";
@@ -1784,14 +1990,32 @@ function cloudMenuMarkup() {
       `}
       ${cloudStatus.configured && !cloudStatus.signedIn ? `
         <div class="account-intro">
-          <strong>メールだけで始められます</strong>
-          <span>初回はユーザー登録、登録済みの場合はログインになります。</span>
+          <strong>無料でユーザー登録</strong>
+          <span>ユーザー名とメールアドレスを登録します。</span>
         </div>
+        <label>ユーザー名<input name="cloudUsername" autocomplete="nickname" maxlength="20" placeholder="2〜20文字"></label>
         <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
-        <button class="primary-button inline-action" type="button" data-cloud-login>登録・ログイン用メールを送る</button>
+        ${termsDisclosureMarkup()}
+        <label class="consent-field"><input name="termsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
+        <button class="primary-button inline-action" type="button" data-cloud-login>登録用メールを送る</button>
         <p class="form-note">届いたメール内のリンクを、この端末で開いてください。パスワードは不要です。</p>
+        <details class="terms-disclosure existing-login">
+          <summary>登録済みの方はこちら</summary>
+          <label>メールアドレス<input name="existingCloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+          <button class="primary-button inline-action" type="button" data-cloud-existing-login>ログイン用メールを送る</button>
+        </details>
       ` : ""}
       ${cloudStatus.signedIn ? `
+        ${accountContext.schemaReady && !accountContext.termsAccepted ? `
+          <div class="account-intro account-attention">
+            <strong>アカウント情報を完了してください</strong>
+            <span>引き続き利用するため、ユーザー名と規約同意が必要です。</span>
+          </div>
+          <label>ユーザー名<input name="accountUsername" autocomplete="nickname" maxlength="20" value="${escapeHtml(accountContext.username)}"></label>
+          ${termsDisclosureMarkup()}
+          <label class="consent-field"><input name="accountTermsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
+          <button class="primary-button inline-action" type="button" data-save-account-setup>登録を完了する</button>
+        ` : ""}
         <div class="cloud-actions">
           ${pendingRemoteState ? `
             <div class="sync-conflict">
@@ -1822,6 +2046,16 @@ function cloudMenuMarkup() {
   `;
 }
 
+function termsDisclosureMarkup() {
+  return `
+    <details class="terms-disclosure">
+      <summary>利用上の注意</summary>
+      <p>記録はサービス運営、統計分析、管理者による利用傾向の把握、AIモデルの学習・評価に利用します。AI用データからメールアドレス、ユーザー名、対戦相手名、メモは除外します。</p>
+      <div><a href="./terms.html" target="_blank" rel="noopener">利用規約</a><a href="./privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a></div>
+    </details>
+  `;
+}
+
 function syncChoiceMarkup(label, summary) {
   return `<div><strong>${label}</strong><span>${summary.decks}デッキ</span><span>${summary.sessions}大会</span><span>${summary.matches}試合</span></div>`;
 }
@@ -1833,8 +2067,12 @@ function menuRowsMarkup() {
       ? `<button type="button" data-open-menu-panel="sessionSettings"><span>セッション設定</span><small>セッションの削除</small><b>›</b></button>`
       : "";
   const cloudText = cloudStatus.signedIn ? "ログイン中・同期設定" : cloudStatus.configured ? "未ログイン" : "未設定";
+  const adminRow = accountContext.role === "superadmin"
+    ? `<button type="button" data-open-admin><span>管理者画面</span><small>利用状況・全体傾向</small><b>›</b></button>`
+    : "";
   return `
     ${pageRow}
+    ${adminRow}
     <button type="button" data-open-guide><span>使い方</span><small>初回設定・大会中の記録・データ保護</small><b>›</b></button>
     <button type="button" data-open-menu-panel="cloudSettings"><span>クラウド同期</span><small>${escapeHtml(cloudText)}</small><b>›</b></button>
     <button type="button" data-open-menu-panel="dataSettings"><span>環境・データ管理</span><small>環境、名称、バックアップ</small><b>›</b></button>

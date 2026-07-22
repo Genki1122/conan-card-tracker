@@ -47,16 +47,77 @@ export async function initializeCloud(onAuthChange) {
   return cloudSnapshot("ready");
 }
 
-export async function signInWithEmail(email) {
+export async function signInWithEmail(email, account = {}, shouldCreateUser = true) {
   const supabase = await getClient();
+  const metadata = account.username ? {
+    username: account.username,
+    terms_version: account.termsVersion,
+    terms_accepted: true,
+    terms_accepted_at: new Date().toISOString()
+  } : undefined;
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
       emailRedirectTo: authRedirectUrl(window.location.href),
-      shouldCreateUser: true
+      shouldCreateUser,
+      data: metadata
     }
   });
   if (error) throw error;
+}
+
+export async function loadAccountContext() {
+  const supabase = await getClient();
+  const userId = requireUserId();
+  const [profileResult, consentResult, adminResult] = await Promise.all([
+    supabase.from("profiles").select("username").eq("user_id", userId).maybeSingle(),
+    supabase.from("account_consents").select("terms_version, accepted_at").eq("user_id", userId).maybeSingle(),
+    supabase.from("admin_users").select("role").eq("user_id", userId).maybeSingle()
+  ]);
+  const error = profileResult.error || consentResult.error || adminResult.error;
+  if (error) throw error;
+  return {
+    schemaReady: true,
+    username: profileResult.data?.username || "",
+    termsAccepted: Boolean(consentResult.data?.accepted_at),
+    termsVersion: consentResult.data?.terms_version || "",
+    role: adminResult.data?.role || ""
+  };
+}
+
+export async function saveAccountSetup({ username, termsVersion }) {
+  const supabase = await getClient();
+  const userId = requireUserId();
+  const now = new Date().toISOString();
+  const [profileResult, consentResult] = await Promise.all([
+    supabase.from("profiles").upsert({ user_id: userId, username, updated_at: now }, { onConflict: "user_id" }),
+    supabase.from("account_consents").upsert({
+      user_id: userId,
+      terms_version: termsVersion,
+      accepted_at: now,
+      ai_training_included: true
+    }, { onConflict: "user_id" })
+  ]);
+  const error = profileResult.error || consentResult.error;
+  if (error) throw error;
+  return loadAccountContext();
+}
+
+export async function loadAdminData() {
+  const supabase = await getClient();
+  requireUserId();
+  const [profilesResult, consentsResult, statesResult] = await Promise.all([
+    supabase.from("profiles").select("user_id, username, created_at, updated_at"),
+    supabase.from("account_consents").select("user_id, terms_version, accepted_at, ai_training_included"),
+    supabase.rpc("get_admin_app_states")
+  ]);
+  const error = profilesResult.error || consentsResult.error || statesResult.error;
+  if (error) throw error;
+  return {
+    profiles: profilesResult.data || [],
+    consents: consentsResult.data || [],
+    states: statesResult.data || []
+  };
 }
 
 export async function signOutCloud() {

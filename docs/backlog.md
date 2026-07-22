@@ -25,3 +25,15 @@
 - Verify production Site URL and Redirect URLs before inviting users.
 - Configure Custom SMTP if the built-in Supabase email provider becomes a login bottleneck.
 - Tighten RLS policies with an explicit `to authenticated` role when the schema is next revised.
+
+## Account Operations
+
+- Add a self-service account deletion flow after confirming the desired retention behavior.
+- Add profile username editing from the account menu.
+- Add a downloadable account archive that includes cloud records and consent history.
+
+## Administration
+
+- Add date-range filters and CSV export when aggregate usage grows beyond the first friend group.
+- Add audit history for administrator actions before introducing moderation or user suspension.
+- Keep opponent names and free-form notes out of routine administrator views.
