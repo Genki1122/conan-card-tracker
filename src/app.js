@@ -99,10 +99,10 @@ function loadState() {
       { id: "deck-conan", name: "赤青コナン", version: "v1", color: "blue" }
     ],
     sessions: [
-      { id: "session-1", deckId: "deck-takagi", deckVersion: "v1", name: "秋葉原チェルモ", date: "2026-05-30", format: "BO1", environment: "現環境" },
-      { id: "session-2", deckId: "deck-takagi", deckVersion: "v1", name: "カードマウンテン", date: "2026-05-29", format: "BO1", environment: "現環境" }
+      { id: "session-1", deckId: "deck-takagi", deckVersion: "v1", name: "秋葉原チェルモ", date: "2026-05-30", format: "BO1", environment: "未設定" },
+      { id: "session-2", deckId: "deck-takagi", deckVersion: "v1", name: "カードマウンテン", date: "2026-05-29", format: "BO1", environment: "未設定" }
     ],
-    environments: ["現環境"],
+    environments: ["未設定"],
     matches: [
       makeMatch("session-1", "高木婚活", "婚活警視庁", "佐藤さん", "win", "first", "rock", "none", "none"),
       makeMatch("session-1", "高木婚活", "婚活長野", "伊達さん", "win", "first", "scissors", "none", "none"),
@@ -134,12 +134,12 @@ function normalizeState(rawState) {
     };
   });
   const deckVersions = new Map(decks.map((deck) => [deck.id, deck.version]));
-  const sessionEnvironments = (rawState.sessions || []).map((session) => session.environment || "未設定");
+  const sessionEnvironments = (rawState.sessions || []).map((session) => normalizeEnvironmentName(session.environment));
   return {
     decks,
     sessions: rawSessions.map((session) => ({
       ...session,
-      environment: session.environment || "未設定",
+      environment: normalizeEnvironmentName(session.environment),
       deckVersion: session.deckVersion || deckVersions.get(session.deckId) || "v1",
       placement: session.placement || "",
       placementNote: session.placementNote || "",
@@ -148,12 +148,17 @@ function normalizeState(rawState) {
       randomPrizeMethodNote: session.randomPrizeMethodNote || "",
       staffRpsHands: [0, 1, 2].map((index) => session.staffRpsHands?.[index] || "")
     })),
-    environments: uniqueValues([...(rawState.environments || []), ...sessionEnvironments]),
+    environments: uniqueValues([...(rawState.environments || []).map(normalizeEnvironmentName), ...sessionEnvironments]),
     matches: (rawState.matches || []).map((match) => ({
       ...match,
       opponentPlayer: normalizePlayerName(match.opponentPlayer)
     }))
   };
+}
+
+function normalizeEnvironmentName(environment) {
+  const name = String(environment || "").trim();
+  return !name || name === "現環境" ? "未設定" : name;
 }
 
 function migrateLegacyMatches(matches) {
@@ -1479,7 +1484,7 @@ function environmentOptions() {
 }
 
 function preferredEnvironment() {
-  return environmentOptions()[0] || "現環境";
+  return environmentOptions()[0] || "未設定";
 }
 
 function addEnvironment(environment) {
