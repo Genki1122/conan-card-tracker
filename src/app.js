@@ -898,6 +898,7 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
+  view.classList.toggle("player-index-screen", route.name === "players");
   backButton.style.visibility = ["deckDetail", "session", "playerDetail", "storeDetail"].includes(route.name) ? "visible" : "hidden";
   fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));

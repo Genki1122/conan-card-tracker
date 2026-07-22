@@ -1701,6 +1701,33 @@ textarea {
   gap: 8px;
 }
 
+.screen.player-index-screen {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 150px);
+  min-height: 0;
+  padding-bottom: 10px;
+  overflow: hidden;
+}
+
+.player-index-screen .player-toolbar,
+.player-index-screen .player-context-filters {
+  flex: 0 0 auto;
+}
+
+.player-index-screen .player-list {
+  min-height: 0;
+  padding-bottom: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.player-index-screen .player-list::-webkit-scrollbar {
+  display: none;
+}
+
 .player-list-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
