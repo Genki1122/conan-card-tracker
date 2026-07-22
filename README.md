@@ -31,3 +31,16 @@ python3 -m http.server 4174
 6. メールアドレスを入力してログイン用メールを送ります。
 
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。
+
+## 友人へ共有する場合
+
+公開URLはそのまま共有できます。ログインしない利用者のデータは各ブラウザ内だけに保存されます。
+
+同じSupabaseプロジェクトを複数人で使う場合も、`app_states.user_id`とRLSにより各利用者のデータは分離されます。リンクを開くだけでメールログインできる状態にするには、次の準備が必要です。
+
+1. `src/supabase-config.js`へProject URLとPublishable keyを設定します。
+2. Supabase AuthenticationのSite URLとRedirect URLsへ本番URLを正確に登録します。
+3. 友人は自分のメールアドレスでログインします。
+4. 少人数テストを超えて共有する前に、Authのメール送信上限を確認し、必要ならCustom SMTPを設定します。
+
+Publishable keyはRLSを有効にしたブラウザアプリで公開するためのキーです。Secret keyと`service_role` keyは使用しません。新規利用者向けの空データ開始と利用案内は、一般共有前の対応項目です。

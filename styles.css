@@ -842,6 +842,46 @@ button {
   cursor: pointer;
 }
 
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(calc(100% - 24px), 456px);
+  min-height: 50px;
+  transform: translateX(-50%);
+  padding: 8px 9px 8px 13px;
+  border: 1px solid rgba(157, 123, 255, 0.62);
+  border-radius: 13px;
+  background: #292431;
+  box-shadow: var(--shadow);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.update-banner[hidden] {
+  display: none;
+}
+
+.phone-shell.update-available .fab {
+  display: none;
+}
+
+.update-banner button {
+  min-width: 58px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--purple-2);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
 .bottom-nav {
   position: fixed;
   left: 50%;
@@ -1063,6 +1103,26 @@ label {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.sync-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.sync-compare > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 9px;
+  background: #17141d;
+}
+
+.sync-compare strong,
+.sync-compare span {
+  font-size: 0.7rem;
 }
 
 .ghost-action {

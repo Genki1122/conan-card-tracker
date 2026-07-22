@@ -1,10 +1,11 @@
-const CACHE_NAME = "conan-card-tracker-v14";
+const CACHE_NAME = "conan-card-tracker-v15";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./src/app.js",
   "./src/analytics.js",
+  "./src/sync-state.js",
   "./src/cloud.js",
   "./src/supabase-config.js",
   "./manifest.webmanifest",

@@ -15,6 +15,7 @@ import {
   summarizeDecks,
   summarizeMatches
 } from "./analytics.js";
+import { stateSummary, statesEqual } from "./sync-state.js";
 import {
   cloudSnapshot,
   getCloudConfig,
@@ -29,13 +30,17 @@ import {
 
 const storageKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
+const syncMetaStorageKey = "conan-card-tracker-sync-meta-v1";
 
 const view = document.querySelector("#appView");
+const phoneShell = document.querySelector(".phone-shell");
 const title = document.querySelector("#screenTitle");
 const topBar = document.querySelector(".top-bar");
 const syncStatusLabel = document.querySelector("#syncStatus");
 const backButton = document.querySelector("#backButton");
 const fabButton = document.querySelector("#fabButton");
+const updateBanner = document.querySelector("#updateBanner");
+const applyUpdateButton = document.querySelector("#applyUpdateButton");
 const dialog = document.querySelector("#entryDialog");
 const entryForm = document.querySelector("#entryForm");
 const dialogKicker = document.querySelector("#dialogKicker");
@@ -51,6 +56,7 @@ const suggestionLists = {
 };
 
 let state = loadState();
+let syncMeta = loadSyncMeta();
 let route = { name: "decks" };
 let dialogMode = null;
 let editingMatchId = null;
@@ -60,9 +66,10 @@ let cloudMessage = "";
 let cloudSaveTimer = null;
 let cloudSaveInFlight = false;
 let cloudSavePending = false;
-let suppressCloudSave = false;
-let cloudUpdatedAt = null;
+let cloudUpdatedAt = syncMeta.updatedAt || null;
+let localDirty = Boolean(syncMeta.dirty);
 let cloudConflict = false;
+let pendingRemoteState = null;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
@@ -114,6 +121,33 @@ function loadState() {
       makeMatch("session-2", "高木婚活", "青蘭", "山本さん", "win", "second", "paper", "none", "none")
     ]
   });
+}
+
+function loadSyncMeta() {
+  try {
+    return JSON.parse(localStorage.getItem(syncMetaStorageKey)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSyncMeta() {
+  syncMeta = {
+    dirty: localDirty,
+    updatedAt: cloudUpdatedAt || null
+  };
+  localStorage.setItem(syncMetaStorageKey, JSON.stringify(syncMeta));
+}
+
+function markLocalDirty() {
+  localDirty = true;
+  saveSyncMeta();
+}
+
+function markCloudSynced(updatedAt) {
+  cloudUpdatedAt = updatedAt || cloudUpdatedAt;
+  localDirty = false;
+  saveSyncMeta();
 }
 
 function normalizeState(rawState) {
@@ -236,12 +270,18 @@ function makeMatch(sessionId, myDeck, opponentDeck, opponentPlayer, result, firs
 
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
-  if (!suppressCloudSave) scheduleCloudSave();
+  markLocalDirty();
+  scheduleCloudSave();
 }
 
 function scheduleCloudSave() {
   if (!cloudStatus.signedIn || cloudConflict) return;
   window.clearTimeout(cloudSaveTimer);
+  if (!navigator.onLine) {
+    cloudMessage = "オフライン・未同期";
+    renderSyncStatus();
+    return;
+  }
   cloudMessage = "クラウド保存待ち";
   renderSyncStatus();
   cloudSaveTimer = window.setTimeout(flushCloudSave, 500);
@@ -259,9 +299,18 @@ async function flushCloudSave() {
   const snapshot = JSON.parse(JSON.stringify(state));
   renderSyncStatus();
   try {
-    cloudUpdatedAt = await saveCloudState(snapshot, { expectedUpdatedAt: cloudUpdatedAt });
+    const updatedAt = await saveCloudState(snapshot, { expectedUpdatedAt: cloudUpdatedAt });
+    cloudUpdatedAt = updatedAt;
+    if (statesEqual(snapshot, state)) {
+      markCloudSynced(updatedAt);
+    } else {
+      localDirty = true;
+      cloudSavePending = true;
+      saveSyncMeta();
+    }
     cloudConflict = false;
-    cloudMessage = "クラウド保存済み";
+    pendingRemoteState = null;
+    cloudMessage = localDirty ? "続きの変更をクラウド保存待ち" : "クラウド保存済み";
     rerenderOpenMenu();
   } catch (error) {
     cloudConflict = error.code === "CLOUD_CONFLICT";
@@ -284,7 +333,7 @@ function renderSyncStatus() {
   let text = "端末保存";
   let tone = "local";
   if (!navigator.onLine) {
-    text = "オフライン";
+    text = localDirty ? "未同期" : "オフライン";
     tone = "warning";
   } else if (cloudConflict || cloudMessage.startsWith("クラウド保存失敗") || cloudMessage.startsWith("クラウド接続失敗")) {
     text = "同期要確認";
@@ -292,7 +341,7 @@ function renderSyncStatus() {
   } else if (cloudStatus.configured && !cloudStatus.signedIn) {
     text = "未ログイン";
     tone = "warning";
-  } else if (cloudStatus.signedIn && (cloudSaveInFlight || cloudMessage.includes("保存待ち") || cloudMessage.includes("保存中"))) {
+  } else if (cloudStatus.signedIn && (localDirty || cloudSaveInFlight || cloudMessage.includes("保存待ち") || cloudMessage.includes("保存中"))) {
     text = "保存中";
     tone = "pending";
   } else if (cloudStatus.signedIn) {
@@ -1279,13 +1328,23 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-cloud-use-remote]")) {
+    if (!pendingRemoteState) return;
+    const local = pendingRemoteState.localSummary;
+    const confirmed = confirm(`クラウドの内容を使用しますか？\nこの端末の ${local.decks}デッキ・${local.sessions}大会・${local.matches}試合 は置き換わります。`);
+    if (!confirmed) return;
+    usePendingRemoteState();
+    openDialog("cloudSettings");
+    return;
+  }
+
   if (event.target.closest("[data-cloud-upload]")) {
     pushCloudState();
     return;
   }
 
   if (event.target.closest("[data-cloud-force-upload]")) {
-    const confirmed = confirm("クラウド上の新しい変更を、この端末のデータで上書きしますか？");
+    const confirmed = confirm("クラウド上の内容を、この端末のデータで上書きしますか？");
     if (confirmed) pushCloudState({ force: true });
     return;
   }
@@ -1295,7 +1354,9 @@ dialogFields.addEventListener("click", (event) => {
       .then((nextStatus) => {
         cloudStatus = nextStatus;
         cloudUpdatedAt = null;
+        saveSyncMeta();
         cloudConflict = false;
+        pendingRemoteState = null;
         cloudMessage = "ログアウトしました";
         openDialog("cloudSettings");
       })
@@ -1453,10 +1514,22 @@ document.querySelector("#moreButton").addEventListener("click", () => {
   openDialog("menu");
 });
 
-window.addEventListener("online", renderSyncStatus);
+window.addEventListener("online", handleOnlineRecovery);
 window.addEventListener("offline", renderSyncStatus);
 
-saveState();
+async function handleOnlineRecovery() {
+  renderSyncStatus();
+  if (isCloudConfigured() && !cloudStatus.signedIn) {
+    await refreshCloudSession();
+    return;
+  }
+  if (!cloudStatus.signedIn || !localDirty || cloudConflict) return;
+  cloudMessage = "オンライン復帰・再同期中";
+  if (cloudUpdatedAt) scheduleCloudSave();
+  else pullCloudState({ uploadWhenEmpty: true, silent: true });
+}
+
+localStorage.setItem(storageKey, JSON.stringify(state));
 render();
 registerServiceWorker();
 refreshCloudSession();
@@ -1495,6 +1568,42 @@ function addEnvironment(environment) {
   state.environments = uniqueValues([...(state.environments || []), environment]);
 }
 
+function stageRemoteReconciliation(remote) {
+  const remoteState = normalizeState(remote.data);
+  if (statesEqual(state, remoteState)) {
+    state = remoteState;
+    localStorage.setItem(storageKey, JSON.stringify(state));
+    markCloudSynced(remote.updated_at);
+    cloudConflict = false;
+    pendingRemoteState = null;
+    return false;
+  }
+
+  pendingRemoteState = {
+    data: remoteState,
+    updatedAt: remote.updated_at,
+    localSummary: stateSummary(state),
+    remoteSummary: stateSummary(remoteState)
+  };
+  cloudUpdatedAt = remote.updated_at;
+  saveSyncMeta();
+  cloudConflict = true;
+  cloudMessage = "端末とクラウドに異なるデータがあります";
+  return true;
+}
+
+function usePendingRemoteState() {
+  if (!pendingRemoteState) return;
+  state = pendingRemoteState.data;
+  localStorage.setItem(storageKey, JSON.stringify(state));
+  markCloudSynced(pendingRemoteState.updatedAt);
+  pendingRemoteState = null;
+  cloudConflict = false;
+  cloudMessage = "クラウドの内容をこの端末へ反映しました";
+  route = validRouteAfterSync(route);
+  render();
+}
+
 async function refreshCloudSession() {
   if (!isCloudConfigured()) {
     cloudStatus = cloudSnapshot("local");
@@ -1523,13 +1632,13 @@ async function pullCloudState(options = {}) {
     }
     const remote = await loadCloudState();
     if (remote?.data) {
-      suppressCloudSave = true;
-      state = normalizeState(remote.data);
-      localStorage.setItem(storageKey, JSON.stringify(state));
-      suppressCloudSave = false;
-      cloudUpdatedAt = remote.updated_at;
-      cloudConflict = false;
-      cloudMessage = `クラウドから読込済み ${formatSyncTime(remote.updated_at)}`;
+      const needsChoice = stageRemoteReconciliation(remote);
+      if (needsChoice) {
+        renderSyncStatus();
+        openDialog("cloudSettings");
+        return;
+      }
+      cloudMessage = `クラウドと同期済み ${formatSyncTime(remote.updated_at)}`;
       route = validRouteAfterSync(route);
       render();
       rerenderOpenMenu();
@@ -1544,7 +1653,6 @@ async function pullCloudState(options = {}) {
     }
     rerenderOpenMenu();
   } catch (error) {
-    suppressCloudSave = false;
     cloudMessage = `クラウド読込失敗: ${error.message}`;
     rerenderOpenMenu();
   }
@@ -1552,18 +1660,27 @@ async function pullCloudState(options = {}) {
 
 async function pushCloudState(options = {}) {
   const { silent = false, force = false } = options;
+  const snapshot = JSON.parse(JSON.stringify(state));
   try {
     if (!silent) {
       cloudMessage = "クラウド保存中";
       rerenderOpenMenu();
     }
-    const updatedAt = await saveCloudState(state, {
+    const updatedAt = await saveCloudState(snapshot, {
       expectedUpdatedAt: cloudUpdatedAt,
       force
     });
     cloudUpdatedAt = updatedAt;
     cloudConflict = false;
-    cloudMessage = `クラウド保存済み ${formatSyncTime(updatedAt)}`;
+    pendingRemoteState = null;
+    if (statesEqual(snapshot, state)) {
+      markCloudSynced(updatedAt);
+    } else {
+      localDirty = true;
+      saveSyncMeta();
+      scheduleCloudSave();
+    }
+    cloudMessage = localDirty ? "続きの変更をクラウド保存待ち" : `クラウド保存済み ${formatSyncTime(updatedAt)}`;
     rerenderOpenMenu();
   } catch (error) {
     cloudConflict = error.code === "CLOUD_CONFLICT";
@@ -1618,12 +1735,36 @@ function sampleLabel(total) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
+  window.addEventListener("load", async () => {
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    try {
+      const registration = await navigator.serviceWorker.register("./sw.js");
+      if (registration.waiting && hadController) showUpdateBanner();
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        worker?.addEventListener("statechange", () => {
+          if (worker.state === "activated" && hadController) showUpdateBanner();
+        });
+      });
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hadController) showUpdateBanner();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") registration.update().catch(() => {});
+      });
+      registration.update().catch(() => {});
+    } catch {
       // PWA support is optional; the app still works in a normal browser tab.
-    });
+    }
   });
 }
+
+function showUpdateBanner() {
+  if (updateBanner) updateBanner.hidden = false;
+  phoneShell?.classList.add("update-available");
+}
+
+applyUpdateButton?.addEventListener("click", () => window.location.reload());
 
 function cloudMenuMarkup() {
   const config = getCloudConfig();
@@ -1657,21 +1798,37 @@ function cloudMenuMarkup() {
       ` : ""}
       ${cloudStatus.signedIn ? `
         <div class="cloud-actions">
-          ${cloudConflict ? `
+          ${pendingRemoteState ? `
+            <div class="sync-conflict">
+              <strong>同期する内容を選択</strong>
+              <span>自動上書きを停止しています。</span>
+              <div class="sync-compare">
+                ${syncChoiceMarkup("この端末", pendingRemoteState.localSummary)}
+                ${syncChoiceMarkup("クラウド", pendingRemoteState.remoteSummary)}
+              </div>
+            </div>
+            <button class="primary-button inline-action" type="button" data-cloud-use-remote>クラウドの内容を使う</button>
+            <button class="danger-button" type="button" data-cloud-force-upload>この端末の内容で上書き</button>
+          ` : cloudConflict ? `
             <div class="sync-conflict">
               <strong>同期競合を検知</strong>
-              <span>別端末の更新を保護するため、自動保存を停止しました。</span>
+              <span>クラウドから読み込んで内容を確認してください。</span>
             </div>
-          ` : ""}
-          <button class="primary-button inline-action" type="button" data-cloud-download>クラウドから読込</button>
-          ${cloudConflict
-            ? `<button class="danger-button" type="button" data-cloud-force-upload>この端末の内容で上書き</button>`
-            : `<button class="primary-button inline-action ghost-action" type="button" data-cloud-upload>この端末をアップロード</button>`}
+            <button class="primary-button inline-action" type="button" data-cloud-download>クラウドとの差分を確認</button>
+            <button class="danger-button" type="button" data-cloud-force-upload>この端末の内容で上書き</button>
+          ` : `
+            <button class="primary-button inline-action" type="button" data-cloud-download>クラウドから読込</button>
+            <button class="primary-button inline-action ghost-action" type="button" data-cloud-upload>この端末をアップロード</button>
+          `}
           <button class="danger-button" type="button" data-cloud-logout>ログアウト</button>
         </div>
       ` : ""}
     </div>
   `;
+}
+
+function syncChoiceMarkup(label, summary) {
+  return `<div><strong>${label}</strong><span>${summary.decks}デッキ</span><span>${summary.sessions}大会</span><span>${summary.matches}試合</span></div>`;
 }
 
 function menuRowsMarkup() {
