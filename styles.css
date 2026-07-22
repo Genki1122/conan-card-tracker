@@ -1318,6 +1318,232 @@ textarea {
   font-weight: 900;
 }
 
+.player-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px 42px;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.player-toolbar input,
+.player-toolbar select,
+.player-toolbar button {
+  min-width: 0;
+  min-height: 44px;
+  border-radius: 11px;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.player-toolbar input,
+.player-toolbar select {
+  padding: 8px 9px;
+}
+
+.player-toolbar button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 1.15rem;
+}
+
+.player-list {
+  gap: 8px;
+}
+
+.player-list-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 70px;
+  border: 0;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: var(--card);
+  text-align: left;
+}
+
+.player-list-card.search-result {
+  min-height: 98px;
+}
+
+.player-list-copy {
+  min-width: 0;
+}
+
+.player-list-copy > strong,
+.player-list-copy > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-list-copy > strong {
+  font-size: 1rem;
+}
+
+.player-list-copy > span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.player-list-card .score-pill {
+  min-width: 66px;
+  height: auto;
+  min-height: 44px;
+  padding: 5px 7px;
+  font-size: 0.94rem;
+}
+
+.player-list-card .score-pill small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.58rem;
+}
+
+.player-rps {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.player-rps.quick {
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.player-rps.quick .rps-stack {
+  height: 7px;
+}
+
+.player-rps-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.player-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -10px 0 8px;
+}
+
+.player-detail-actions button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.player-first-look {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.player-first-look strong {
+  display: block;
+  font-size: 0.85rem;
+}
+
+.recent-player-decks span {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+  overflow-x: auto;
+}
+
+.recent-player-decks i {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #17141d;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.player-deck-breakdown {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(118px, 1fr);
+  gap: 7px;
+  overflow-x: auto;
+}
+
+.player-deck-breakdown > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 11px;
+  background: var(--card);
+}
+
+.player-deck-breakdown span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.player-history-list {
+  gap: 7px;
+}
+
+.player-history-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 68px;
+  border: 0;
+  border-radius: 13px;
+  padding: 10px 11px;
+  background: var(--card);
+  text-align: left;
+}
+
+.player-history-copy {
+  min-width: 0;
+}
+
+.player-history-copy strong,
+.player-history-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-history-copy strong {
+  font-size: 0.82rem;
+}
+
+.player-history-copy span {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.player-history-card .result-pill {
+  min-width: 54px;
+  height: 36px;
+  font-size: 0.82rem;
+}
+
 @media (min-width: 860px) {
   body {
     background:

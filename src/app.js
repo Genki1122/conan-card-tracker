@@ -2,10 +2,13 @@ import {
   canWinRandomPrize,
   filterMatchesByMonth,
   getCrossBreakdown,
-  getPlayerBreakdown,
+  getPlayerOverviews,
   getPlayerRecord,
-  getRpsBreakdown,
+  getRecordedRpsBreakdown,
   getStaffRpsBreakdown,
+  isKnownPlayerName,
+  playerWinRateTone,
+  sortPlayerOverviews,
   summarizeDecks,
   summarizeMatches
 } from "./analytics.js";
@@ -141,7 +144,10 @@ function normalizeState(rawState) {
       staffRpsHands: [0, 1, 2].map((index) => session.staffRpsHands?.[index] || "")
     })),
     environments: uniqueValues([...(rawState.environments || []), ...sessionEnvironments]),
-    matches: rawState.matches || []
+    matches: (rawState.matches || []).map((match) => ({
+      ...match,
+      opponentPlayer: normalizePlayerName(match.opponentPlayer)
+    }))
   };
 }
 
@@ -182,7 +188,7 @@ function migrateLegacyMatches(matches) {
         ...match,
         id: crypto.randomUUID(),
         sessionId: sessionByDeck.get(deck.id).id,
-        opponentPlayer: "未登録",
+        opponentPlayer: "不明",
         opponentRps: "unknown",
         myPassed: "none",
         opponentPassed: "none"
@@ -193,6 +199,11 @@ function migrateLegacyMatches(matches) {
 
 function uniqueValues(values) {
   return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function normalizePlayerName(value) {
+  const name = String(value || "").trim();
+  return !name || name === "未登録" ? "不明" : name;
 }
 
 function makeMatch(sessionId, myDeck, opponentDeck, opponentPlayer, result, firstPlayer, opponentRps, myPassed, opponentPassed) {
@@ -254,7 +265,7 @@ function rerenderOpenMenu() {
 
 function updateSuggestions() {
   suggestionLists.opponentDecks.innerHTML = optionList(uniqueValues(state.matches.map((match) => match.opponentDeck)));
-  suggestionLists.players.innerHTML = optionList(uniqueValues(state.matches.map((match) => match.opponentPlayer).filter((name) => name !== "未登録")));
+  suggestionLists.players.innerHTML = optionList(uniqueValues(state.matches.map((match) => match.opponentPlayer).filter(isKnownPlayerName)));
   suggestionLists.sessionNames.innerHTML = optionList(uniqueValues(state.sessions.map((session) => session.name)));
   suggestionLists.environments.innerHTML = optionList(uniqueValues([...(state.environments || []), ...state.sessions.map((session) => session.environment)]));
 }
@@ -544,7 +555,7 @@ function renderSession(sessionId) {
           <details class="round-extra">
             <summary>詳細</summary>
             <div class="detail-grid">
-              <span>相手: ${escapeHtml(match.opponentPlayer || "未登録")}</span>
+              <span>相手: ${escapeHtml(normalizePlayerName(match.opponentPlayer))}</span>
               <span>じゃんけん: 相手${rpsLabels[match.opponentRps]}</span>
               <span>パス 自分:${passLabel(match.myPassed)} 相手:${passLabel(match.opponentPassed)}</span>
               ${match.memo ? `<span>メモ: ${escapeHtml(match.memo)}</span>` : ""}
@@ -575,7 +586,8 @@ function renderSummary() {
   const matches = filterMatchesByMonth(baseMatches, selectedMonth);
   const summary = summarizeMatches(matches);
   const passRecord = splitPassRecord(matches);
-  const rows = sortCrossRows(getCrossBreakdown(matches, selectedPivot), selectedSort);
+  const breakdownMatches = selectedPivot === "opponentPlayer" ? matches.filter((match) => isKnownPlayerName(match.opponentPlayer)) : matches;
+  const rows = sortCrossRows(getCrossBreakdown(breakdownMatches, selectedPivot), selectedSort);
 
   view.innerHTML = `
     <div class="analysis-primary-filters">
@@ -673,34 +685,35 @@ function renderSummary() {
 function renderPlayers() {
   title.textContent = "プレイヤー";
   const selected = route.playerName;
-  const rows = getPlayerBreakdown(state.matches).filter((row) => row.name !== "未登録");
 
   if (selected) {
+    title.textContent = selected;
     const record = getPlayerRecord(selected, state.matches);
-    const rpsRows = getRpsBreakdown(record.matches);
+    const enriched = enrichMatches(record.matches).sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+    const rps = getRecordedRpsBreakdown(enriched);
+    const latest = enriched[0];
+    const recentDecks = uniqueValues(enriched.map((match) => match.opponentDeck)).slice(0, 3);
+    const deckRows = getCrossBreakdown(enriched, "opponentDeck");
     view.innerHTML = `
-      ${summaryCard(record, [`⚔ ${record.total}試合`, `${record.wins}勝 ${record.losses}敗 ${record.draws}分`])}
-      <button class="compact-action-button" type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button>
-      <h2 class="section-title">じゃんけん傾向</h2>
-      <section class="rps-card compact">
-        <div class="rps-stack" aria-label="相手のじゃんけん傾向">
-          ${rpsRows.map((row) => `<span class="rps-segment ${row.key}" style="width:${row.percentage}%" title="${row.label} ${row.percentage}%"></span>`).join("")}
-        </div>
-        <div class="rps-legend">
-          ${rpsRows.map((row) => `<span><i class="${row.key}"></i>${row.label} ${row.percentage}%</span>`).join("")}
-        </div>
+      ${summaryCard(record, [`最終 ${formatDate(latest?.date)}`, `${record.total}戦`], true)}
+      <div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>
+      <section class="player-first-look">
+        <div><strong>じゃんけん傾向</strong>${playerRpsMarkup(rps)}</div>
+        <div class="recent-player-decks"><strong>最近の相手デッキ</strong><span>${recentDecks.map((name) => `<i>${escapeHtml(name)}</i>`).join("") || "記録なし"}</span></div>
       </section>
+      <h2 class="section-title">相手デッキ別</h2>
+      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("")}</div>
       <h2 class="section-title">${escapeHtml(selected)}との履歴</h2>
-      <div class="list-stack">
-        ${record.matches.map((match) => {
+      <div class="list-stack player-history-list">
+        ${enriched.map((match) => {
           const session = getSession(match.sessionId);
           return `
-            <button class="round-card player-match-card" type="button" data-edit-match="${match.id}">
-              <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-              <span>
-                <strong class="round-title">${escapeHtml(match.myDeck)} vs ${escapeHtml(match.opponentDeck)}</strong>
-                <span class="round-meta"><span>${formatDate(session?.date)}</span><span>${escapeHtml(session?.name || "")}</span><span>${firstLabels[match.firstPlayer]}</span><span>相手${rpsLabels[match.opponentRps]}</span></span>
+            <button class="player-history-card" type="button" data-edit-match="${match.id}">
+              <span class="player-history-copy">
+                <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${escapeHtml(match.opponentDeck)}</strong>
+                <span>${escapeHtml(session?.name || "")}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
               </span>
+              <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
             </button>
           `;
         }).join("")}
@@ -709,21 +722,34 @@ function renderPlayers() {
     return;
   }
 
+  const query = String(route.playerQuery || "").trim().toLocaleLowerCase("ja");
+  const sortKey = ["latest", "matches", "winRate", "name"].includes(route.playerSort) ? route.playerSort : "latest";
+  const direction = route.playerDirection === "asc" ? "asc" : "desc";
+  const overviewRows = getPlayerOverviews(enrichMatches(state.matches));
+  const rows = sortPlayerOverviews(overviewRows.filter((row) => row.name.toLocaleLowerCase("ja").includes(query)), sortKey, direction);
   view.innerHTML = `
-    <h2 class="section-title">相手プレイヤー別</h2>
-    <div class="list-stack">
+    <div class="player-toolbar">
+      <input type="search" data-player-search aria-label="プレイヤーを検索" placeholder="プレイヤーを検索" value="${escapeHtml(route.playerQuery || "")}">
+      <select data-player-sort aria-label="並び順">${optionTags([["latest", "最終対戦日"], ["matches", "対戦数"], ["winRate", "勝率"], ["name", "名前"]], sortKey)}</select>
+      <button type="button" data-player-direction aria-label="${direction === "desc" ? "降順" : "昇順"}">${direction === "desc" ? "↓" : "↑"}</button>
+    </div>
+    <div class="list-stack player-list">
       ${rows.map((row) => `
-        <button class="list-card" type="button" data-open-player="${escapeHtml(row.name)}">
-          <span class="badge">人</span>
-          <span>
-            <strong class="list-title">${escapeHtml(row.name)}</strong>
-            <span class="list-meta"><span>${row.wins}勝 ${row.losses}敗 ${row.draws}分</span><span>${row.total}戦</span></span>
+        <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
+          <span class="player-list-copy">
+            <strong>${escapeHtml(row.name)}</strong>
+            <span>最終 ${formatDate(row.latestMatch?.date)}・${escapeHtml(row.latestMatch?.opponentDeck || "デッキ不明")}・${escapeHtml(row.latestMatch?.store || "場所不明")}</span>
+            ${query ? playerRpsMarkup(row.recordedRps, true) : ""}
           </span>
-          <span class="score-pill">${row.winRate}%</span>
+          <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
         </button>
-      `).join("") || `<div class="empty-card">試合記録に相手プレイヤー名を入れると、ここに履歴が出ます</div>`}
+      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
     </div>
   `;
+}
+
+function playerRpsMarkup(rps, compact = false) {
+  return `<div class="player-rps ${compact ? "quick" : ""}"><div class="rps-stack" aria-label="相手のじゃんけん傾向">${rps.rows.map((row) => `<span class="rps-segment ${row.key}" style="width:${row.percentage}%" title="${row.label} ${row.percentage}%"></span>`).join("")}</div><div class="player-rps-labels">${rps.rows.map((row) => `<span>${row.label} ${row.percentage}%</span>`).join("")}<span>${rps.total}戦</span></div></div>`;
 }
 
 function renderSessions() {
@@ -944,7 +970,7 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = `
       <input type="hidden" name="myDeck" value="${escapeHtml(editingMatch?.myDeck || deck?.name || "")}">
       <label>相手デッキ<input name="opponentDeck" list="opponentDeckSuggestions" required placeholder="例: 婚活警視庁" value="${escapeHtml(editingMatch?.opponentDeck || "")}"></label>
-      <label>相手プレイヤーネーム（任意）<input name="opponentPlayer" list="playerSuggestions" placeholder="例: 佐藤さん" value="${escapeHtml(editingMatch?.opponentPlayer === "未登録" ? "" : editingMatch?.opponentPlayer || "")}"></label>
+      <label>相手プレイヤーネーム<input name="opponentPlayer" list="playerSuggestions" value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}"></label>
       <div class="inline-fields">
         <label>勝敗<select name="result" required>${requiredOptionTags([["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "", "選択")}</select></label>
         <label>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
@@ -984,9 +1010,9 @@ entryForm.addEventListener("submit", (event) => {
   if (dialogMode === "playerRename") {
     const currentName = data.get("currentPlayerName").trim();
     const nextName = data.get("playerName").trim();
-    if (!nextName || nextName === "未登録") return;
+    if (!isKnownPlayerName(nextName)) return;
     state.matches = state.matches.map((match) => match.opponentPlayer === currentName ? { ...match, opponentPlayer: nextName } : match);
-    route = { name: "playerDetail", playerName: nextName };
+    route = { ...route, name: "playerDetail", playerName: nextName };
   }
 
   if (dialogMode === "session") {
@@ -1024,7 +1050,7 @@ entryForm.addEventListener("submit", (event) => {
       sessionId: route.sessionId,
       myDeck: data.get("myDeck").trim(),
       opponentDeck: data.get("opponentDeck").trim(),
-      opponentPlayer: data.get("opponentPlayer").trim() || "未登録",
+      opponentPlayer: normalizePlayerName(data.get("opponentPlayer")),
       result: data.get("result"),
       firstPlayer: data.get("firstPlayer"),
       opponentRps: data.get("opponentRps"),
@@ -1056,15 +1082,17 @@ view.addEventListener("click", (event) => {
   const editSessionButton = event.target.closest("[data-edit-session]");
   const analysisPivotButton = event.target.closest("[data-analysis-pivot]");
   const renamePlayerButton = event.target.closest("[data-rename-player]");
+  const playerDirectionButton = event.target.closest("[data-player-direction]");
   const tournamentViewButton = event.target.closest("[data-tournament-view]");
   const storeButton = event.target.closest("[data-open-store]");
   if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck });
   if (sessionButton) setRoute({ name: "session", sessionId: sessionButton.dataset.openSession, returnStore: route.name === "storeDetail" ? route.storeName : "", returnAfterStore: route.name === "storeDetail" ? route.returnRoute : null });
-  if (playerButton) setRoute({ name: "playerDetail", playerName: playerButton.dataset.openPlayer });
+  if (playerButton) setRoute({ ...route, name: "playerDetail", playerName: playerButton.dataset.openPlayer });
   if (editButton) openDialog("match", editButton.dataset.editMatch);
   if (editSessionButton) openDialog("session", editSessionButton.dataset.editSession);
   if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot }));
   if (renamePlayerButton) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
+  if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
   if (tournamentViewButton) setRoute({ name: "sessions", view: tournamentViewButton.dataset.tournamentView });
   if (storeButton) setRoute({ name: "storeDetail", storeName: storeButton.dataset.openStore, returnRoute: route.name === "summary" ? { ...route } : null });
 });
@@ -1082,6 +1110,20 @@ view.addEventListener("change", (event) => {
   if (environmentSelect) setRoute(analysisRoute({ environment: environmentSelect.value, store: "" }));
   const storeSelect = event.target.closest("[data-analysis-store-select]");
   if (storeSelect) setRoute(analysisRoute({ store: storeSelect.value }));
+  const playerSort = event.target.closest("[data-player-sort]");
+  if (playerSort) setRoute({ ...route, name: "players", playerName: "", playerSort: playerSort.value });
+});
+
+view.addEventListener("input", (event) => {
+  const search = event.target.closest("[data-player-search]");
+  if (!search) return;
+  route = { ...route, name: "players", playerName: "", playerQuery: search.value };
+  renderPlayers();
+  queueMicrotask(() => {
+    const nextSearch = view.querySelector("[data-player-search]");
+    nextSearch?.focus();
+    nextSearch?.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
+  });
 });
 
 dialogFields.addEventListener("change", (event) => {
@@ -1091,6 +1133,11 @@ dialogFields.addEventListener("change", (event) => {
   if (!prize) return;
   prize.disabled = !canWinRandomPrize(placement.value);
   if (prize.disabled) prize.checked = false;
+});
+
+dialogFields.addEventListener("focusin", (event) => {
+  const playerInput = event.target.closest("input[name='opponentPlayer']");
+  if (playerInput?.value === "不明") playerInput.select();
 });
 
 dialogFields.addEventListener("click", (event) => {
@@ -1286,7 +1333,7 @@ backButton.addEventListener("click", () => {
     if (route.returnStore) setRoute({ name: "storeDetail", storeName: route.returnStore, returnRoute: route.returnAfterStore });
     else setRoute(session ? { name: "deckDetail", deckId: session.deckId } : { name: "sessions" });
   }
-  if (route.name === "playerDetail") setRoute({ name: "players" });
+  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc" });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
 });
 

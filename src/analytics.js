@@ -172,7 +172,43 @@ export function summarizeDecks(decks = [], sessions = [], matches = []) {
 }
 
 export function getPlayerBreakdown(matches = []) {
-  return groupedBreakdown(matches, "opponentPlayer");
+  return groupedBreakdown(matches.filter((match) => isKnownPlayerName(match.opponentPlayer)), "opponentPlayer");
+}
+
+export function getPlayerOverviews(matches = []) {
+  return getPlayerBreakdown(matches).map((row) => {
+    const playerMatches = matches.filter((match) => String(match.opponentPlayer || "").trim() === row.name);
+    const latestMatch = [...playerMatches].sort((a, b) => (
+      String(b.date || "").localeCompare(String(a.date || ""))
+      || String(b.id || "").localeCompare(String(a.id || ""))
+    ))[0] || null;
+    return {
+      ...row,
+      latestMatch,
+      recordedRps: getRecordedRpsBreakdown(playerMatches)
+    };
+  });
+}
+
+export function sortPlayerOverviews(rows = [], key = "latest", direction = "desc") {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (key === "name") return multiplier * a.name.localeCompare(b.name, "ja");
+    if (key === "matches") return multiplier * (a.total - b.total) || a.name.localeCompare(b.name, "ja");
+    if (key === "winRate") return multiplier * (a.winRate - b.winRate) || multiplier * (a.total - b.total) || a.name.localeCompare(b.name, "ja");
+    return multiplier * String(a.latestMatch?.date || "").localeCompare(String(b.latestMatch?.date || "")) || a.name.localeCompare(b.name, "ja");
+  });
+}
+
+export function playerWinRateTone(winRate = 0) {
+  if (winRate > 60) return "positive";
+  if (winRate < 40) return "negative";
+  return "neutral";
+}
+
+export function isKnownPlayerName(name) {
+  const normalized = String(name || "").trim();
+  return Boolean(normalized) && !["未登録", "不明"].includes(normalized);
 }
 
 export function getPlayerRecord(name, matches = []) {
@@ -205,6 +241,18 @@ export function getRpsBreakdown(matches = []) {
     total: counts.get(key),
     percentage: rate(counts.get(key), total)
   }));
+}
+
+export function getRecordedRpsBreakdown(matches = []) {
+  const options = rpsOptions.filter(([key]) => key !== "unknown");
+  const recorded = matches.filter((match) => options.some(([key]) => key === match.opponentRps));
+  return {
+    total: recorded.length,
+    rows: options.map(([key, label]) => {
+      const total = recorded.filter((match) => match.opponentRps === key).length;
+      return { key, label, total, percentage: rate(total, recorded.length) };
+    })
+  };
 }
 
 export function getAnalysisInsights(matches = []) {

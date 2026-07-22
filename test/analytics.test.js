@@ -9,11 +9,15 @@ import {
   getAnalysisInsights,
   getCrossBreakdown,
   getPlayerBreakdown,
+  getPlayerOverviews,
   getPlayerRecord,
+  getRecordedRpsBreakdown,
   getRpsBreakdown,
   getStaffRpsBreakdown,
   summarizeDecks,
-  summarizeMatches
+  summarizeMatches,
+  playerWinRateTone,
+  sortPlayerOverviews
 } from "../src/analytics.js";
 
 const matches = [
@@ -151,6 +155,54 @@ describe("calendar month and store archive analytics", () => {
         ]
       }
     ]);
+  });
+});
+
+describe("player quick lookup analytics", () => {
+  const lookupMatches = [
+    { id: "p1", opponentPlayer: "佐藤さん", opponentDeck: "警視庁", opponentRps: "rock", result: "win", date: "2026-07-01", store: "店舗A" },
+    { id: "p2", opponentPlayer: "佐藤さん", opponentDeck: "長野", opponentRps: "unknown", result: "loss", date: "2026-07-20", store: "店舗B" },
+    { id: "p3", opponentPlayer: "田中さん", opponentDeck: "王冠", opponentRps: "paper", result: "win", date: "2026-07-10", store: "店舗C" },
+    { id: "p4", opponentPlayer: "未登録", opponentDeck: "不明", opponentRps: "scissors", result: "loss", date: "2026-07-21", store: "店舗D" },
+    { id: "p5", opponentPlayer: "不明", opponentDeck: "不明", opponentRps: "rock", result: "loss", date: "2026-07-22", store: "店舗E" }
+  ];
+
+  it("excludes unknown names and includes latest match context", () => {
+    assert.deepEqual(getPlayerOverviews(lookupMatches).map((row) => ({
+      name: row.name,
+      total: row.total,
+      latestDate: row.latestMatch.date,
+      latestDeck: row.latestMatch.opponentDeck,
+      latestStore: row.latestMatch.store
+    })), [
+      { name: "佐藤さん", total: 2, latestDate: "2026-07-20", latestDeck: "長野", latestStore: "店舗B" },
+      { name: "田中さん", total: 1, latestDate: "2026-07-10", latestDeck: "王冠", latestStore: "店舗C" }
+    ]);
+  });
+
+  it("calculates hand tendency using only recorded RPS matches", () => {
+    assert.deepEqual(getRecordedRpsBreakdown(lookupMatches.slice(0, 3)), {
+      total: 2,
+      rows: [
+        { key: "rock", label: "グー", total: 1, percentage: 50 },
+        { key: "paper", label: "パー", total: 1, percentage: 50 },
+        { key: "scissors", label: "チョキ", total: 0, percentage: 0 }
+      ]
+    });
+  });
+
+  it("sorts player rows in both directions", () => {
+    const rows = getPlayerOverviews(lookupMatches);
+    assert.deepEqual(sortPlayerOverviews(rows, "latest", "desc").map((row) => row.name), ["佐藤さん", "田中さん"]);
+    assert.deepEqual(sortPlayerOverviews(rows, "matches", "asc").map((row) => row.name), ["田中さん", "佐藤さん"]);
+    assert.deepEqual(sortPlayerOverviews(rows, "winRate", "asc").map((row) => row.name), ["佐藤さん", "田中さん"]);
+  });
+
+  it("uses a neutral tone from 40 through 60 percent", () => {
+    assert.equal(playerWinRateTone(39.9), "negative");
+    assert.equal(playerWinRateTone(40), "neutral");
+    assert.equal(playerWinRateTone(60), "neutral");
+    assert.equal(playerWinRateTone(60.1), "positive");
   });
 });
 
