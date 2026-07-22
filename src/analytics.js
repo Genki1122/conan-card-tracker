@@ -132,6 +132,20 @@ export function filterMatchesByMonth(matches = [], month = "") {
   return matches.filter((match) => String(match.date || "").slice(0, 7) === month);
 }
 
+export function filterDecksByArchived(decks = [], archived = false) {
+  return decks.filter((deck) => Boolean(deck.archived) === archived);
+}
+
+export function formatRecordDate(value, referenceYear = new Date().getFullYear()) {
+  const dateValue = String(value || "").slice(0, 10);
+  const match = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "日付未設定";
+  const [, year, month, day] = match;
+  const weekday = ["日", "月", "火", "水", "木", "金", "土"][new Date(`${dateValue}T00:00:00`).getDay()];
+  const prefix = Number(year) === Number(referenceYear) ? "" : `${Number(year)}/`;
+  return `${prefix}${Number(month)}/${Number(day)}(${weekday})`;
+}
+
 export function getStaffRpsBreakdown(sessions = []) {
   const options = rpsOptions.filter(([key]) => key !== "unknown");
   return [0, 1, 2].map((index) => {
@@ -188,6 +202,10 @@ export function getPlayerOverviews(matches = []) {
       recordedRps: getRecordedRpsBreakdown(playerMatches)
     };
   });
+}
+
+export function getPlayerOverviewsByMonth(matches = [], month = "") {
+  return getPlayerOverviews(filterMatchesByMonth(matches, month));
 }
 
 export function sortPlayerOverviews(rows = [], key = "latest", direction = "desc") {

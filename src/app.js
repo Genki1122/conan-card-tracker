@@ -1,8 +1,10 @@
 import {
   canWinRandomPrize,
+  filterDecksByArchived,
   filterMatchesByMonth,
+  formatRecordDate,
   getCrossBreakdown,
-  getPlayerOverviews,
+  getPlayerOverviewsByMonth,
   getPlayerRecord,
   getRecordedRpsBreakdown,
   getStaffRpsBreakdown,
@@ -29,6 +31,7 @@ const legacyStorageKey = "conan-card-match-casebook";
 
 const view = document.querySelector("#appView");
 const title = document.querySelector("#screenTitle");
+const syncStatusLabel = document.querySelector("#syncStatus");
 const backButton = document.querySelector("#backButton");
 const fabButton = document.querySelector("#fabButton");
 const dialog = document.querySelector("#entryDialog");
@@ -124,6 +127,7 @@ function normalizeState(rawState) {
     return {
       ...deck,
       version: deck.version || "v1",
+      archived: Boolean(deck.archived),
       createdAt: deck.createdAt || dates.sort()[0] || "1970-01-01",
       lastUsedAt: deck.lastUsedAt || dates.sort().at(-1) || ""
     };
@@ -157,6 +161,7 @@ function migrateLegacyMatches(matches) {
     name,
     version: "v1",
     color: "purple",
+    archived: false,
     createdAt: new Date().toISOString(),
     lastUsedAt: new Date().toISOString()
   }));
@@ -231,6 +236,7 @@ function scheduleCloudSave() {
   if (!cloudStatus.signedIn || cloudConflict) return;
   window.clearTimeout(cloudSaveTimer);
   cloudMessage = "クラウド保存待ち";
+  renderSyncStatus();
   cloudSaveTimer = window.setTimeout(flushCloudSave, 500);
 }
 
@@ -244,6 +250,7 @@ async function flushCloudSave() {
   cloudSaveInFlight = true;
   cloudSavePending = false;
   const snapshot = JSON.parse(JSON.stringify(state));
+  renderSyncStatus();
   try {
     cloudUpdatedAt = await saveCloudState(snapshot, { expectedUpdatedAt: cloudUpdatedAt });
     cloudConflict = false;
@@ -255,12 +262,38 @@ async function flushCloudSave() {
     rerenderOpenMenu();
   } finally {
     cloudSaveInFlight = false;
+    renderSyncStatus();
     if (cloudSavePending) scheduleCloudSave();
   }
 }
 
 function rerenderOpenMenu() {
-  if (dialog.open && dialogMode === "menu") openDialog("menu");
+  renderSyncStatus();
+  if (dialog.open && ["menu", "cloudSettings"].includes(dialogMode)) openDialog(dialogMode);
+}
+
+function renderSyncStatus() {
+  if (!syncStatusLabel) return;
+  let text = "端末保存";
+  let tone = "local";
+  if (!navigator.onLine) {
+    text = "オフライン";
+    tone = "warning";
+  } else if (cloudConflict || cloudMessage.startsWith("クラウド保存失敗") || cloudMessage.startsWith("クラウド接続失敗")) {
+    text = "同期要確認";
+    tone = "error";
+  } else if (cloudStatus.configured && !cloudStatus.signedIn) {
+    text = "未ログイン";
+    tone = "warning";
+  } else if (cloudStatus.signedIn && (cloudSaveInFlight || cloudMessage.includes("保存待ち") || cloudMessage.includes("保存中"))) {
+    text = "保存中";
+    tone = "pending";
+  } else if (cloudStatus.signedIn) {
+    text = "同期済み";
+    tone = "synced";
+  }
+  syncStatusLabel.textContent = text;
+  syncStatusLabel.dataset.tone = tone;
 }
 
 function updateSuggestions() {
@@ -438,9 +471,7 @@ function recordToneClass(record) {
 }
 
 function formatDate(value) {
-  if (!value) return "日付未設定";
-  const date = new Date(`${value}T00:00:00`);
-  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", weekday: "short" }).format(date);
+  return formatRecordDate(value);
 }
 
 function formatMonth(value) {
@@ -478,26 +509,47 @@ function summaryCard(summary, meta, compact = false) {
   `;
 }
 
+function recordStrip(summary, meta = [], badge = "") {
+  return `
+    <section class="record-strip">
+      <div><span>戦績</span><strong>${recordText(summary)}</strong></div>
+      <div><span>勝率</span><strong>${summary.winRate || 0}%</strong></div>
+      <p>${meta.map((item) => `<span>${item}</span>`).join("")}</p>
+      ${badge ? `<i>${escapeHtml(badge)}</i>` : ""}
+    </section>
+  `;
+}
+
 function renderDecks() {
   title.textContent = "デッキ選択";
+  const archivedView = route.deckView === "archived";
+  const visibleIds = new Set(filterDecksByArchived(state.decks, archivedView).map((deck) => deck.id));
+  const visibleSessions = state.sessions.filter((session) => visibleIds.has(session.deckId));
+  const visibleSessionIds = new Set(visibleSessions.map((session) => session.id));
+  const visibleMatches = state.matches.filter((match) => visibleSessionIds.has(match.sessionId));
   const decks = summarizeDecks(state.decks, state.sessions, state.matches)
+    .filter((deck) => visibleIds.has(deck.id))
     .sort((a, b) => deckRecency(getDeck(b.id)).localeCompare(deckRecency(getDeck(a.id))));
-  const overall = summarizeMatches(state.matches);
+  const overall = summarizeMatches(visibleMatches);
+  const archivedCount = filterDecksByArchived(state.decks, true).length;
+  const activeCount = state.decks.length - archivedCount;
 
   view.innerHTML = `
-    ${summaryCard(overall, [`▣ ${state.decks.length}デッキ`, `□ ${state.sessions.length}セッション`, `⚔ ${state.matches.length}試合`])}
-    <h2 class="section-title">デッキ</h2>
-    <div class="list-stack">
+    ${recordStrip(overall, [`${decks.length}デッキ`, `${visibleSessions.length}大会`, `${visibleMatches.length}試合`])}
+    <div class="view-switch deck-view-switch">
+      <button class="${archivedView ? "" : "active"}" type="button" data-deck-view="active">使用中 ${activeCount}</button>
+      <button class="${archivedView ? "active" : ""}" type="button" data-deck-view="archived">アーカイブ ${archivedCount}</button>
+    </div>
+    <div class="list-stack deck-list">
       ${decks.map((deck) => `
-        <button class="list-card" type="button" data-open-deck="${deck.id}">
-          <span class="badge">▣</span>
-          <span>
-            <strong class="list-title">${escapeHtml(deck.name)}</strong>
-            <span class="list-meta"><span>${escapeHtml(getDeck(deck.id)?.version || "v1")}</span><span>□ ${deck.sessions}セッション</span><span>⚔ ${deck.total}試合</span></span>
+        <button class="deck-list-card" type="button" data-open-deck="${deck.id}">
+          <span class="deck-list-copy">
+            <strong>${escapeHtml(deck.name)} <i>${escapeHtml(getDeck(deck.id)?.version || "v1")}</i></strong>
+            <span>${deck.sessions ? `最終 ${formatDate(deckRecency(getDeck(deck.id)))}` : "未使用"}</span>
           </span>
           <span class="score-pill ${recordToneClass(deck)}">${deck.wins}-${deck.losses}</span>
         </button>
-      `).join("") || `<div class="empty-card">＋ からデッキを登録しましょう</div>`}
+      `).join("") || `<div class="empty-card">${archivedView ? "アーカイブしたデッキはありません" : "＋ からデッキを登録しましょう"}</div>`}
     </div>
   `;
 }
@@ -510,7 +562,7 @@ function renderDeckDetail(deckId) {
 
   title.textContent = deck.name;
   view.innerHTML = `
-    ${summaryCard(summary, [`□ ${deckSessions.length}セッション`, `⚔ ${summary.total}試合`], true)}
+    ${recordStrip(summary, [escapeHtml(deck.version || "v1"), `${deckSessions.length}大会`, `${summary.total}試合`], deck.archived ? "アーカイブ" : "")}
     <div class="list-stack compact-session-list">
       ${deckSessions.map((session) => {
         const count = matchesForSession(session.id).length;
@@ -537,10 +589,13 @@ function renderSession(sessionId) {
 
   title.textContent = session.name;
   view.innerHTML = `
-    ${summaryCard(summary, [`${escapeHtml(session.deckVersion || "v1")}`, `□ ${formatDate(session.date)}`, `${escapeHtml(session.environment || "未設定")}`, `⚔ ${rounds.length}試合`, `${escapeHtml(session.format || "BO1")}`])}
-    ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-outcome-line"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
-    <button class="session-edit-button" type="button" data-edit-session="${session.id}">セッション編集</button>
-    <h2 class="section-title">ラウンド</h2>
+    <section class="session-compact-head">
+      <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b></div>
+      <button type="button" data-edit-session="${session.id}">編集</button>
+      <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
+      ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
+    </section>
+    <div class="section-title-row"><h2>ラウンド</h2><span>${rounds.length}試合</span></div>
     <div class="list-stack">
       ${rounds.map((match, index) => `
         <article class="round-card compact-round">
@@ -685,16 +740,20 @@ function renderSummary() {
 function renderPlayers() {
   title.textContent = "プレイヤー";
   const selected = route.playerName;
+  const months = analysisMonths();
+  const selectedMonth = route.playerMonth && months.includes(route.playerMonth) ? route.playerMonth : "";
+  const periodMatches = filterMatchesByMonth(enrichMatches(state.matches), selectedMonth);
 
   if (selected) {
     title.textContent = selected;
-    const record = getPlayerRecord(selected, state.matches);
-    const enriched = enrichMatches(record.matches).sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+    const record = getPlayerRecord(selected, periodMatches);
+    const enriched = [...record.matches].sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
     const rps = getRecordedRpsBreakdown(enriched);
     const latest = enriched[0];
     const recentDecks = uniqueValues(enriched.map((match) => match.opponentDeck)).slice(0, 3);
     const deckRows = getCrossBreakdown(enriched, "opponentDeck");
     view.innerHTML = `
+      <div class="player-detail-period"><span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}</span><strong>${record.total}戦</strong></div>
       ${summaryCard(record, [`最終 ${formatDate(latest?.date)}`, `${record.total}戦`], true)}
       <div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>
       <section class="player-first-look">
@@ -702,7 +761,7 @@ function renderPlayers() {
         <div class="recent-player-decks"><strong>最近の相手デッキ</strong><span>${recentDecks.map((name) => `<i>${escapeHtml(name)}</i>`).join("") || "記録なし"}</span></div>
       </section>
       <h2 class="section-title">相手デッキ別</h2>
-      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("")}</div>
+      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("") || `<div><strong>記録なし</strong><span>期間を変更してください</span></div>`}</div>
       <h2 class="section-title">${escapeHtml(selected)}との履歴</h2>
       <div class="list-stack player-history-list">
         ${enriched.map((match) => {
@@ -725,7 +784,7 @@ function renderPlayers() {
   const query = String(route.playerQuery || "").trim().toLocaleLowerCase("ja");
   const sortKey = ["latest", "matches", "winRate", "name"].includes(route.playerSort) ? route.playerSort : "latest";
   const direction = route.playerDirection === "asc" ? "asc" : "desc";
-  const overviewRows = getPlayerOverviews(enrichMatches(state.matches));
+  const overviewRows = getPlayerOverviewsByMonth(enrichMatches(state.matches), selectedMonth);
   const rows = sortPlayerOverviews(overviewRows.filter((row) => row.name.toLocaleLowerCase("ja").includes(query)), sortKey, direction);
   view.innerHTML = `
     <div class="player-toolbar">
@@ -733,6 +792,7 @@ function renderPlayers() {
       <select data-player-sort aria-label="並び順">${optionTags([["latest", "最終対戦日"], ["matches", "対戦数"], ["winRate", "勝率"], ["name", "名前"]], sortKey)}</select>
       <button type="button" data-player-direction aria-label="${direction === "desc" ? "降順" : "昇順"}">${direction === "desc" ? "↓" : "↑"}</button>
     </div>
+    <label class="player-period-filter"><span>期間</span><select data-player-month aria-label="期間"><option value="">全期間</option>${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}</select></label>
     <div class="list-stack player-list">
       ${rows.map((row) => `
         <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
@@ -743,7 +803,7 @@ function renderPlayers() {
           </span>
           <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
         </button>
-      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
+      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : selectedMonth ? "この期間のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
     </div>
   `;
 }
@@ -816,8 +876,10 @@ function staffHandBar(hand) {
 
 function render() {
   updateSuggestions();
+  renderSyncStatus();
+  const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
   backButton.style.visibility = ["deckDetail", "session", "playerDetail", "storeDetail"].includes(route.name) ? "visible" : "hidden";
-  fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || (route.name === "sessions" && route.view === "stores");
+  fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
@@ -882,42 +944,34 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "menu") {
-    const pageAction = routeActionMarkup();
     dialogKicker.textContent = "Data";
-    dialogTitle.textContent = "データメニュー";
+    dialogTitle.textContent = "メニュー";
     dialogSubmit.hidden = true;
     dialogFields.innerHTML = `
-      ${pageAction}
-      ${cloudMenuMarkup()}
-      <div class="menu-note">
-        <strong>自動保存中</strong>
-        <span>入力した内容はこの端末のブラウザに保存されています。</span>
-      </div>
-      <div class="environment-manager">
-        <strong>環境管理</strong>
-        <div class="environment-chip-list">
-          ${environmentOptions().map((environment) => `<span>${escapeHtml(environment)}</span>`).join("") || "<span>未登録</span>"}
-        </div>
-        <label>環境を追加<input name="newEnvironment" list="environmentSuggestions" placeholder="例: 第4弾環境"></label>
-        <button class="primary-button inline-action" type="button" data-add-environment>環境を追加</button>
-      </div>
-      <details class="import-panel">
-        <summary>名称を統合</summary>
-        <label>対象<select name="mergeType">
-          <option value="opponentDeck">相手デッキ</option>
-          <option value="opponentPlayer">プレイヤー</option>
-        </select></label>
-        <label>統合元<input name="mergeFrom" placeholder="表記揺れしている名称"></label>
-        <label>統合先<input name="mergeTo" placeholder="今後使う正式名称"></label>
-        <button class="primary-button inline-action" type="button" data-merge-names>名称を統合</button>
-      </details>
-      <button class="primary-button inline-action" type="button" data-copy-export>JSONをコピー</button>
-      <details class="import-panel">
-        <summary>JSONから復元</summary>
-        <label>JSONデータ<textarea name="importJson" rows="5" placeholder="PCでコピーしたJSONを貼り付け"></textarea></label>
-        <button class="primary-button inline-action" type="button" data-import-json>インポート</button>
-      </details>
+      <div class="short-menu">${menuRowsMarkup()}</div>
+      <div class="menu-note"><strong>自動保存</strong><span>入力内容はこの端末に保存されます。</span></div>
     `;
+  }
+
+  if (["deckSettings", "sessionSettings"].includes(mode)) {
+    dialogKicker.textContent = "Page";
+    dialogTitle.textContent = mode === "deckSettings" ? "デッキ設定" : "セッション設定";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${routeActionMarkup()}`;
+  }
+
+  if (mode === "cloudSettings") {
+    dialogKicker.textContent = "Cloud";
+    dialogTitle.textContent = "クラウド同期";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${cloudMenuMarkup()}`;
+  }
+
+  if (mode === "dataSettings") {
+    dialogKicker.textContent = "Data";
+    dialogTitle.textContent = "環境・データ管理";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${dataSettingsMarkup()}`;
   }
 
   if (mode === "session") {
@@ -926,7 +980,8 @@ function openDialog(mode, targetId = null) {
     const editingSession = editingSessionId ? getSession(editingSessionId) : null;
     dialogTitle.textContent = editingSession ? "セッション編集" : "セッション登録";
     dialogSubmit.textContent = editingSession ? "更新" : "保存";
-    const deckId = route.deckId || state.decks[0]?.id || "";
+    const activeDecks = filterDecksByArchived(state.decks);
+    const deckId = route.deckId || activeDecks[0]?.id || "";
     const fixedDeck = editingSession ? getDeck(editingSession.deckId) : route.name === "deckDetail" ? getDeck(route.deckId) : null;
     dialogFields.innerHTML = `
       ${fixedDeck ? `
@@ -937,7 +992,7 @@ function openDialog(mode, targetId = null) {
           <input type="hidden" name="deckId" value="${fixedDeck.id}">
         </div>
       ` : `
-        <label>使用デッキ<select name="deckId" required>${state.decks.map((deck) => `<option value="${deck.id}" ${deck.id === deckId ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
+        <label>使用デッキ<select name="deckId" required>${activeDecks.map((deck) => `<option value="${deck.id}" ${deck.id === deckId ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
       `}
       <label>大会名/店舗名<input name="name" list="sessionNameSuggestions" required placeholder="例: 秋葉原チェルモ" value="${escapeHtml(editingSession?.name || "")}"></label>
       <label>環境<input name="environment" list="environmentSuggestions" required placeholder="例: 第3弾環境" value="${escapeHtml(editingSession?.environment || preferredEnvironment())}"></label>
@@ -970,21 +1025,26 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = `
       <input type="hidden" name="myDeck" value="${escapeHtml(editingMatch?.myDeck || deck?.name || "")}">
       <label>相手デッキ<input name="opponentDeck" list="opponentDeckSuggestions" required placeholder="例: 婚活警視庁" value="${escapeHtml(editingMatch?.opponentDeck || "")}"></label>
-      <label>相手プレイヤーネーム<input name="opponentPlayer" list="playerSuggestions" value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}"></label>
       <div class="inline-fields">
         <label>勝敗<select name="result" required>${requiredOptionTags([["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "", "選択")}</select></label>
         <label>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
       </div>
-      <label>じゃんけんで相手の出した手<select name="opponentRps">${optionTags([["unknown", "未記録"], ["rock", "グー"], ["scissors", "チョキ"], ["paper", "パー"]], editingMatch?.opponentRps || "unknown")}</select></label>
-      <div class="inline-fields">
-        <label>自分のパス<select name="myPassed">${passOptions(editingMatch?.myPassed || "none")}</select></label>
-        <label>相手のパス<select name="opponentPassed">${passOptions(editingMatch?.opponentPassed || "none")}</select></label>
-      </div>
-      <label>メモ<textarea name="memo" rows="3" placeholder="印象的だった展開、敗因など">${escapeHtml(editingMatch?.memo || "")}</textarea></label>
+      <details class="match-extra-fields" ${editingMatch ? "open" : ""}>
+        <summary>対戦相手・詳細記録</summary>
+        <label>相手プレイヤーネーム<input name="opponentPlayer" list="playerSuggestions" value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}"></label>
+        <label>じゃんけんで相手の出した手<select name="opponentRps">${optionTags([["unknown", "未記録"], ["rock", "グー"], ["scissors", "チョキ"], ["paper", "パー"]], editingMatch?.opponentRps || "unknown")}</select></label>
+        <div class="inline-fields">
+          <label>自分のパス<select name="myPassed">${passOptions(editingMatch?.myPassed || "none")}</select></label>
+          <label>相手のパス<select name="opponentPassed">${passOptions(editingMatch?.opponentPassed || "none")}</select></label>
+        </div>
+        <label>メモ<textarea name="memo" rows="3" placeholder="印象的だった展開、敗因など">${escapeHtml(editingMatch?.memo || "")}</textarea></label>
+      </details>
       ${editingMatch ? `<button class="danger-button" type="button" data-delete-editing-match>この試合を削除</button>` : ""}
     `;
   }
 
+  dialog.scrollTop = 0;
+  entryForm.scrollTop = 0;
   if (!dialog.open) dialog.showModal();
 }
 
@@ -1000,6 +1060,7 @@ entryForm.addEventListener("submit", (event) => {
       name: data.get("name").trim(),
       version: data.get("version").trim() || "v1",
       color: "purple",
+      archived: false,
       createdAt: now,
       lastUsedAt: now
     };
@@ -1083,9 +1144,10 @@ view.addEventListener("click", (event) => {
   const analysisPivotButton = event.target.closest("[data-analysis-pivot]");
   const renamePlayerButton = event.target.closest("[data-rename-player]");
   const playerDirectionButton = event.target.closest("[data-player-direction]");
+  const deckViewButton = event.target.closest("[data-deck-view]");
   const tournamentViewButton = event.target.closest("[data-tournament-view]");
   const storeButton = event.target.closest("[data-open-store]");
-  if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck });
+  if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck, returnDeckView: route.deckView || "active" });
   if (sessionButton) setRoute({ name: "session", sessionId: sessionButton.dataset.openSession, returnStore: route.name === "storeDetail" ? route.storeName : "", returnAfterStore: route.name === "storeDetail" ? route.returnRoute : null });
   if (playerButton) setRoute({ ...route, name: "playerDetail", playerName: playerButton.dataset.openPlayer });
   if (editButton) openDialog("match", editButton.dataset.editMatch);
@@ -1093,6 +1155,7 @@ view.addEventListener("click", (event) => {
   if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot }));
   if (renamePlayerButton) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
   if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
+  if (deckViewButton) setRoute({ name: "decks", deckView: deckViewButton.dataset.deckView === "archived" ? "archived" : "active" });
   if (tournamentViewButton) setRoute({ name: "sessions", view: tournamentViewButton.dataset.tournamentView });
   if (storeButton) setRoute({ name: "storeDetail", storeName: storeButton.dataset.openStore, returnRoute: route.name === "summary" ? { ...route } : null });
 });
@@ -1112,6 +1175,8 @@ view.addEventListener("change", (event) => {
   if (storeSelect) setRoute(analysisRoute({ store: storeSelect.value }));
   const playerSort = event.target.closest("[data-player-sort]");
   if (playerSort) setRoute({ ...route, name: "players", playerName: "", playerSort: playerSort.value });
+  const playerMonth = event.target.closest("[data-player-month]");
+  if (playerMonth) setRoute({ ...route, name: "players", playerName: "", playerMonth: playerMonth.value });
 });
 
 view.addEventListener("input", (event) => {
@@ -1141,18 +1206,24 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  const menuPanelButton = event.target.closest("[data-open-menu-panel]");
+  if (menuPanelButton) {
+    openDialog(menuPanelButton.dataset.openMenuPanel);
+    return;
+  }
+
   if (event.target.closest("[data-save-cloud-config]")) {
     const url = dialogFields.querySelector("input[name='supabaseUrl']").value;
     const anonKey = dialogFields.querySelector("input[name='supabaseAnonKey']").value;
     if (!url.trim() || !anonKey.trim()) {
       cloudMessage = "Supabase URLとAnon keyを入力してください";
-      openDialog("menu");
+      openDialog("cloudSettings");
       return;
     }
     saveCloudConfig(url, anonKey);
     cloudMessage = "Supabase設定を保存しました";
     refreshCloudSession();
-    openDialog("menu");
+    openDialog("cloudSettings");
     return;
   }
 
@@ -1168,11 +1239,11 @@ dialogFields.addEventListener("click", (event) => {
     signInWithEmail(email)
       .then(() => {
         cloudMessage = "ログイン用メールを送信しました";
-        openDialog("menu");
+        openDialog("cloudSettings");
       })
       .catch((error) => {
         cloudMessage = `ログイン失敗: ${error.message}`;
-        openDialog("menu");
+        openDialog("cloudSettings");
       });
     return;
   }
@@ -1200,11 +1271,11 @@ dialogFields.addEventListener("click", (event) => {
         cloudUpdatedAt = null;
         cloudConflict = false;
         cloudMessage = "ログアウトしました";
-        openDialog("menu");
+        openDialog("cloudSettings");
       })
       .catch((error) => {
         cloudMessage = `ログアウト失敗: ${error.message}`;
-        openDialog("menu");
+        openDialog("cloudSettings");
       });
     return;
   }
@@ -1221,6 +1292,17 @@ dialogFields.addEventListener("click", (event) => {
     saveState();
     dialog.close();
     route = { name: "decks" };
+    render();
+    return;
+  }
+
+  const archiveDeckButton = event.target.closest("[data-toggle-deck-archive]");
+  if (archiveDeckButton) {
+    const deck = getDeck(archiveDeckButton.dataset.toggleDeckArchive);
+    if (!deck) return;
+    state.decks = state.decks.map((item) => item.id === deck.id ? { ...item, archived: !deck.archived } : item);
+    saveState();
+    dialog.close();
     render();
     return;
   }
@@ -1266,7 +1348,7 @@ dialogFields.addEventListener("click", (event) => {
     addEnvironment(value);
     saveState();
     updateSuggestions();
-    openDialog("menu");
+    openDialog("dataSettings");
     return;
   }
 
@@ -1281,12 +1363,12 @@ dialogFields.addEventListener("click", (event) => {
     saveState();
     title.textContent = name;
     cloudMessage = `デッキ設定を更新しました。新規セッションは${version}で記録されます`;
-    openDialog("menu");
+    openDialog("deckSettings");
     return;
   }
 
   if (event.target.closest("[data-merge-names]")) {
-    const field = dialogFields.querySelector("select[name='mergeType']").value;
+    const field = dialogFields.querySelector("[name='mergeType']").value;
     const from = dialogFields.querySelector("input[name='mergeFrom']").value.trim();
     const to = dialogFields.querySelector("input[name='mergeTo']").value.trim();
     if (!from || !to || from === to) return;
@@ -1296,7 +1378,7 @@ dialogFields.addEventListener("click", (event) => {
     ));
     saveState();
     cloudMessage = `${affected}試合の名称を「${to}」へ統合しました`;
-    openDialog("menu");
+    openDialog("dataSettings");
     return;
   }
 
@@ -1327,13 +1409,13 @@ fabButton.addEventListener("click", () => {
 });
 
 backButton.addEventListener("click", () => {
-  if (route.name === "deckDetail") setRoute({ name: "decks" });
+  if (route.name === "deckDetail") setRoute({ name: "decks", deckView: route.returnDeckView || "active" });
   if (route.name === "session") {
     const session = getSession(route.sessionId);
     if (route.returnStore) setRoute({ name: "storeDetail", storeName: route.returnStore, returnRoute: route.returnAfterStore });
     else setRoute(session ? { name: "deckDetail", deckId: session.deckId } : { name: "sessions" });
   }
-  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc" });
+  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "" });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
 });
 
@@ -1344,6 +1426,9 @@ navButtons.forEach((button) => {
 document.querySelector("#moreButton").addEventListener("click", () => {
   openDialog("menu");
 });
+
+window.addEventListener("online", renderSyncStatus);
+window.addEventListener("offline", renderSyncStatus);
 
 saveState();
 render();
@@ -1563,6 +1648,44 @@ function cloudMenuMarkup() {
   `;
 }
 
+function menuRowsMarkup() {
+  const pageRow = route.name === "deckDetail"
+    ? `<button type="button" data-open-menu-panel="deckSettings"><span>デッキ設定</span><small>名前・バージョン・アーカイブ</small><b>›</b></button>`
+    : route.name === "session"
+      ? `<button type="button" data-open-menu-panel="sessionSettings"><span>セッション設定</span><small>セッションの削除</small><b>›</b></button>`
+      : "";
+  const cloudText = cloudStatus.signedIn ? "ログイン中・同期設定" : cloudStatus.configured ? "未ログイン" : "未設定";
+  return `
+    ${pageRow}
+    <button type="button" data-open-menu-panel="cloudSettings"><span>クラウド同期</span><small>${escapeHtml(cloudText)}</small><b>›</b></button>
+    <button type="button" data-open-menu-panel="dataSettings"><span>環境・データ管理</span><small>環境、名称、バックアップ</small><b>›</b></button>
+  `;
+}
+
+function dataSettingsMarkup() {
+  return `
+    <div class="environment-manager">
+      <strong>環境管理</strong>
+      <div class="environment-chip-list">${environmentOptions().map((environment) => `<span>${escapeHtml(environment)}</span>`).join("") || "<span>未登録</span>"}</div>
+      <label>環境を追加<input name="newEnvironment" list="environmentSuggestions" placeholder="例: 第4弾環境"></label>
+      <button class="primary-button inline-action" type="button" data-add-environment>環境を追加</button>
+    </div>
+    <details class="import-panel">
+      <summary>相手デッキ名を統合</summary>
+      <input type="hidden" name="mergeType" value="opponentDeck">
+      <label>統合元<input name="mergeFrom" placeholder="表記揺れしている名称"></label>
+      <label>統合先<input name="mergeTo" placeholder="今後使う正式名称"></label>
+      <button class="primary-button inline-action" type="button" data-merge-names>名称を統合</button>
+    </details>
+    <button class="primary-button inline-action ghost-action" type="button" data-copy-export>JSONをコピー</button>
+    <details class="import-panel">
+      <summary>JSONから復元</summary>
+      <label>JSONデータ<textarea name="importJson" rows="5" placeholder="PCでコピーしたJSONを貼り付け"></textarea></label>
+      <button class="primary-button inline-action" type="button" data-import-json>インポート</button>
+    </details>
+  `;
+}
+
 function routeActionMarkup() {
   if (route.name === "deckDetail") {
     const deck = getDeck(route.deckId);
@@ -1575,6 +1698,7 @@ function routeActionMarkup() {
         <label>デッキ名<input name="deckName" value="${escapeHtml(deck.name)}"></label>
         <label>現行バージョン<input name="deckVersion" value="${escapeHtml(deck.version || "v1")}" placeholder="例: v2 / 新弾後"></label>
         <button class="primary-button inline-action" type="button" data-update-deck="${deck.id}">デッキ設定を更新</button>
+        <button class="primary-button inline-action ghost-action" type="button" data-toggle-deck-archive="${deck.id}">${deck.archived ? "使用中に戻す" : "アーカイブする"}</button>
       </div>
       <div class="danger-zone">
         <strong>このデッキ</strong>

@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   canWinRandomPrize,
   filterMatchesByMonth,
+  filterDecksByArchived,
+  formatRecordDate,
   getDeckBreakdown,
   getOpponentBreakdown,
   getOpponentTurnBreakdown,
@@ -10,6 +12,7 @@ import {
   getCrossBreakdown,
   getPlayerBreakdown,
   getPlayerOverviews,
+  getPlayerOverviewsByMonth,
   getPlayerRecord,
   getRecordedRpsBreakdown,
   getRpsBreakdown,
@@ -203,6 +206,31 @@ describe("player quick lookup analytics", () => {
     assert.equal(playerWinRateTone(40), "neutral");
     assert.equal(playerWinRateTone(60), "neutral");
     assert.equal(playerWinRateTone(60.1), "positive");
+  });
+
+  it("filters player overviews by calendar month", () => {
+    assert.deepEqual(
+      getPlayerOverviewsByMonth(lookupMatches, "2026-07").map((row) => row.name),
+      ["佐藤さん", "田中さん"]
+    );
+    assert.deepEqual(getPlayerOverviewsByMonth(lookupMatches, "2026-06"), []);
+  });
+});
+
+describe("compact mobile navigation helpers", () => {
+  it("treats legacy decks as active and separates archived decks", () => {
+    const decks = [
+      { id: "active", name: "現行" },
+      { id: "archived", name: "旧環境", archived: true }
+    ];
+    assert.deepEqual(filterDecksByArchived(decks).map((deck) => deck.id), ["active"]);
+    assert.deepEqual(filterDecksByArchived(decks, true).map((deck) => deck.id), ["archived"]);
+  });
+
+  it("shows the year only outside the reference year", () => {
+    assert.equal(formatRecordDate("2026-07-22", 2026), "7/22(水)");
+    assert.equal(formatRecordDate("2025-07-22", 2026), "2025/7/22(火)");
+    assert.equal(formatRecordDate("", 2026), "日付未設定");
   });
 });
 
