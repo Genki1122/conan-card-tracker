@@ -2,6 +2,9 @@
 
 コナンカードゲーム向けの対戦記録アプリです。静的ファイルだけで動くため、GitHub Pages / Netlify / Vercel などに置けばスマホから外でも使えます。
 
+- アプリ: https://genki1122.github.io/conan-card-tracker/
+- 友人向け手引書: https://genki1122.github.io/conan-card-tracker/guide.html
+
 ## ローカル起動
 
 ```sh

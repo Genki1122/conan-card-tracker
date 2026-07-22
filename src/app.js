@@ -1281,6 +1281,11 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-guide]")) {
+    window.location.href = "./guide.html";
+    return;
+  }
+
   const menuPanelButton = event.target.closest("[data-open-menu-panel]");
   if (menuPanelButton) {
     openDialog(menuPanelButton.dataset.openMenuPanel);
@@ -1840,6 +1845,7 @@ function menuRowsMarkup() {
   const cloudText = cloudStatus.signedIn ? "ログイン中・同期設定" : cloudStatus.configured ? "未ログイン" : "未設定";
   return `
     ${pageRow}
+    <button type="button" data-open-guide><span>使い方</span><small>初回設定・大会中の記録・データ保護</small><b>›</b></button>
     <button type="button" data-open-menu-panel="cloudSettings"><span>クラウド同期</span><small>${escapeHtml(cloudText)}</small><b>›</b></button>
     <button type="button" data-open-menu-panel="dataSettings"><span>環境・データ管理</span><small>環境、名称、バックアップ</small><b>›</b></button>
   `;
