@@ -107,6 +107,15 @@ a { color: inherit; }
   font-weight: 900;
 }
 
+.trust-note {
+  display: block;
+  margin-top: 9px;
+  color: var(--dim);
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
 .jump-nav {
   position: sticky;
   top: 74px;

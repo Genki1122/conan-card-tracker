@@ -30,8 +30,8 @@ python3 -m http.server 4174
 2. SQL Editorで `supabase/schema.sql` を実行します。
 3. Authentication > URL Configurationで、GitHub PagesのURLをSite URLとRedirect URLsに登録します。
 4. Project Settings > APIから `Project URL` と `anon public` keyを控えます。
-5. アプリの3点メニュー > クラウド同期にURLとAnon keyを入力します。
-6. メールアドレスを入力してログイン用メールを送ります。
+5. `src/supabase-config.js`へProject URLとPublishable keyを設定します。
+6. 友人は手引書の「無料でユーザー登録」からメールアドレスを入力します。
 
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。
 
@@ -41,7 +41,7 @@ python3 -m http.server 4174
 
 同じSupabaseプロジェクトを複数人で使う場合も、`app_states.user_id`とRLSにより各利用者のデータは分離されます。リンクを開くだけでメールログインできる状態にするには、次の準備が必要です。
 
-1. `src/supabase-config.js`へProject URLとPublishable keyを設定します。
+1. `src/supabase-config.js`へProject URLとPublishable keyを設定します（このリポジトリでは設定済みです）。
 2. Supabase AuthenticationのSite URLとRedirect URLsへ本番URLを正確に登録します。
 3. 友人は自分のメールアドレスでログインします。
 4. 少人数テストを超えて共有する前に、Authのメール送信上限を確認し、必要ならCustom SMTPを設定します。

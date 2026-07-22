@@ -16,6 +16,11 @@ import {
   summarizeMatches
 } from "./analytics.js";
 import { stateSummary, statesEqual } from "./sync-state.js";
+import { createInitialState } from "./initial-state.js";
+import {
+  accountOnboardingIntent,
+  clearAccountOnboardingUrl
+} from "./onboarding.js";
 import {
   cloudSnapshot,
   getCloudConfig,
@@ -68,6 +73,7 @@ let cloudSaveInFlight = false;
 let cloudSavePending = false;
 let cloudUpdatedAt = syncMeta.updatedAt || null;
 let localDirty = Boolean(syncMeta.dirty);
+let accountOnboardingActive = accountOnboardingIntent(window.location.search);
 let cloudConflict = false;
 let pendingRemoteState = null;
 
@@ -101,26 +107,7 @@ function loadState() {
     // Ignore old data that cannot be migrated.
   }
 
-  return normalizeState({
-    decks: [
-      { id: "deck-takagi", name: "高木婚活", version: "v1", color: "purple" },
-      { id: "deck-conan", name: "赤青コナン", version: "v1", color: "blue" }
-    ],
-    sessions: [
-      { id: "session-1", deckId: "deck-takagi", deckVersion: "v1", name: "秋葉原チェルモ", date: "2026-05-30", format: "BO1", environment: "未設定" },
-      { id: "session-2", deckId: "deck-takagi", deckVersion: "v1", name: "カードマウンテン", date: "2026-05-29", format: "BO1", environment: "未設定" }
-    ],
-    environments: ["未設定"],
-    matches: [
-      makeMatch("session-1", "高木婚活", "婚活警視庁", "佐藤さん", "win", "first", "rock", "none", "none"),
-      makeMatch("session-1", "高木婚活", "婚活長野", "伊達さん", "win", "first", "scissors", "none", "none"),
-      makeMatch("session-1", "高木婚活", "白黄王冠", "田中さん", "win", "second", "paper", "none", "pass1"),
-      makeMatch("session-1", "高木婚活", "白黄王冠", "田中さん", "win", "first", "rock", "none", "none"),
-      makeMatch("session-1", "高木婚活", "疾風警視庁", "鈴木さん", "loss", "first", "scissors", "pass1", "none"),
-      makeMatch("session-2", "高木婚活", "緑服部", "佐藤さん", "win", "second", "rock", "none", "none"),
-      makeMatch("session-2", "高木婚活", "青蘭", "山本さん", "win", "second", "paper", "none", "none")
-    ]
-  });
+  return normalizeState(createInitialState());
 }
 
 function loadSyncMeta() {
@@ -250,22 +237,6 @@ function uniqueValues(values) {
 function normalizePlayerName(value) {
   const name = String(value || "").trim();
   return !name || name === "未登録" ? "不明" : name;
-}
-
-function makeMatch(sessionId, myDeck, opponentDeck, opponentPlayer, result, firstPlayer, opponentRps, myPassed, opponentPassed) {
-  return {
-    id: crypto.randomUUID(),
-    sessionId,
-    myDeck,
-    opponentDeck,
-    opponentPlayer,
-    result,
-    firstPlayer,
-    opponentRps,
-    myPassed,
-    opponentPassed,
-    memo: ""
-  };
 }
 
 function saveState() {
@@ -1034,10 +1005,11 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "cloudSettings") {
-    dialogKicker.textContent = "Cloud";
-    dialogTitle.textContent = "クラウド同期";
+    dialogKicker.textContent = cloudStatus.signedIn ? "Cloud" : "Account";
+    dialogTitle.textContent = cloudStatus.signedIn ? "クラウド同期" : "ユーザー登録・ログイン";
     dialogSubmit.hidden = true;
-    dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${cloudMenuMarkup()}`;
+    const backToMenu = accountOnboardingActive ? "" : `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>`;
+    dialogFields.innerHTML = `${backToMenu}${cloudMenuMarkup()}`;
   }
 
   if (mode === "dataSettings") {
@@ -1308,6 +1280,7 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-cloud-login]")) {
+    const button = event.target.closest("[data-cloud-login]");
     const input = dialogFields.querySelector("input[name='cloudEmail']");
     const email = input.value.trim();
     if (!email) {
@@ -1316,9 +1289,11 @@ dialogFields.addEventListener("click", (event) => {
       input.setCustomValidity("");
       return;
     }
+    button.disabled = true;
+    button.textContent = "メール送信中...";
     signInWithEmail(email)
       .then(() => {
-        cloudMessage = "ログイン用メールを送信しました";
+        cloudMessage = "メールを送信しました。届いたメール内のリンクを開いてください";
         openDialog("cloudSettings");
       })
       .catch((error) => {
@@ -1537,7 +1512,16 @@ async function handleOnlineRecovery() {
 localStorage.setItem(storageKey, JSON.stringify(state));
 render();
 registerServiceWorker();
+if (accountOnboardingActive) {
+  cloudMessage = "メールアドレスだけで無料登録できます";
+  openDialog("cloudSettings");
+  history.replaceState(null, "", clearAccountOnboardingUrl(window.location.href));
+}
 refreshCloudSession();
+
+dialog.addEventListener("close", () => {
+  accountOnboardingActive = false;
+});
 
 function passOptions(selected = "none") {
   return [
@@ -1774,32 +1758,38 @@ applyUpdateButton?.addEventListener("click", () => window.location.reload());
 function cloudMenuMarkup() {
   const config = getCloudConfig();
   const statusText = cloudStatus.signedIn
-    ? `ログイン中: ${cloudStatus.email}`
+    ? cloudStatus.email
     : cloudStatus.configured
-      ? "Supabase設定済み / 未ログイン"
-      : "未設定";
+      ? "未登録 / 未ログイン"
+      : "利用できません";
 
   return `
     <div class="cloud-manager">
       <div class="cloud-head">
-        <strong>クラウド同期</strong>
+        <strong>${cloudStatus.signedIn ? "クラウド同期" : "アカウント"}</strong>
         <span>${escapeHtml(statusText)}</span>
       </div>
       ${cloudMessage ? `<p class="cloud-message">${escapeHtml(cloudMessage)}</p>` : ""}
       ${cloudStatus.configured ? "" : `
-        <label>Supabase URL<input name="supabaseUrl" inputmode="url" placeholder="https://xxxx.supabase.co" value="${escapeHtml(config.url || "")}"></label>
-        <label>Anon key<input name="supabaseAnonKey" placeholder="eyJ..." value="${escapeHtml(config.anonKey || "")}"></label>
-        <button class="primary-button inline-action" type="button" data-save-cloud-config>Supabase設定を保存</button>
-      `}
-      ${cloudStatus.configured && !cloudStatus.signedIn ? `
-        <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
-        <button class="primary-button inline-action" type="button" data-cloud-login>ログイン用メールを送る</button>
+        <div class="account-intro">
+          <strong>現在ユーザー登録を利用できません</strong>
+          <span>アプリ管理者へ連絡してください。</span>
+        </div>
         <details class="import-panel compact-help">
-          <summary>Supabase設定を変更</summary>
-          <label>Supabase URL<input name="supabaseUrl" inputmode="url" value="${escapeHtml(config.url || "")}"></label>
-          <label>Anon key<input name="supabaseAnonKey" value="${escapeHtml(config.anonKey || "")}"></label>
+          <summary>管理者向けSupabase設定</summary>
+          <label>Supabase URL<input name="supabaseUrl" inputmode="url" placeholder="https://xxxx.supabase.co" value="${escapeHtml(config.url || "")}"></label>
+          <label>Publishable key<input name="supabaseAnonKey" placeholder="sb_publishable_..." value="${escapeHtml(config.anonKey || "")}"></label>
           <button class="primary-button inline-action" type="button" data-save-cloud-config>Supabase設定を保存</button>
         </details>
+      `}
+      ${cloudStatus.configured && !cloudStatus.signedIn ? `
+        <div class="account-intro">
+          <strong>メールだけで始められます</strong>
+          <span>初回はユーザー登録、登録済みの場合はログインになります。</span>
+        </div>
+        <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <button class="primary-button inline-action" type="button" data-cloud-login>登録・ログイン用メールを送る</button>
+        <p class="form-note">届いたメール内のリンクを、この端末で開いてください。パスワードは不要です。</p>
       ` : ""}
       ${cloudStatus.signedIn ? `
         <div class="cloud-actions">

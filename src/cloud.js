@@ -1,4 +1,5 @@
-import { supabaseConfig } from "./supabase-config.js";
+import { supabaseConfig } from "./supabase-config.js?v=2";
+import { authRedirectUrl } from "./onboarding.js";
 
 const configStorageKey = "conan-card-tracker-supabase-config";
 const tableName = "app_states";
@@ -51,7 +52,8 @@ export async function signInWithEmail(email) {
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: window.location.href.split("#")[0]
+      emailRedirectTo: authRedirectUrl(window.location.href),
+      shouldCreateUser: true
     }
   });
   if (error) throw error;
