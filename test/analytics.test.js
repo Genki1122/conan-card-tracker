@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  canWinRandomPrize,
+  filterMatchesByMonth,
   getDeckBreakdown,
   getOpponentBreakdown,
   getOpponentTurnBreakdown,
@@ -9,6 +11,7 @@ import {
   getPlayerBreakdown,
   getPlayerRecord,
   getRpsBreakdown,
+  getStaffRpsBreakdown,
   summarizeDecks,
   summarizeMatches
 } from "../src/analytics.js";
@@ -83,6 +86,70 @@ describe("getOpponentBreakdown", () => {
     assert.deepEqual(getOpponentBreakdown(matches), [
       { name: "緑服部", total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 },
       { name: "黄安室", total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 }
+    ]);
+  });
+});
+
+describe("calendar month and store archive analytics", () => {
+  it("excludes only champions from random prize eligibility", () => {
+    assert.equal(canWinRandomPrize("champion"), false);
+    assert.equal(canWinRandomPrize("second"), true);
+    assert.equal(canWinRandomPrize("top4"), true);
+    assert.equal(canWinRandomPrize(""), true);
+  });
+
+  it("filters enriched matches by calendar month", () => {
+    assert.deepEqual(filterMatchesByMonth(matches, "2026-06"), matches);
+    assert.deepEqual(filterMatchesByMonth(matches, "2026-07"), []);
+    assert.deepEqual(filterMatchesByMonth(matches, ""), matches);
+  });
+
+  it("groups cross breakdown rows by calendar month", () => {
+    const rows = getCrossBreakdown([
+      ...matches,
+      { ...matches[0], id: "4", date: "2026-07-01", result: "loss" }
+    ], "month");
+    assert.deepEqual(rows.map(({ name, total, wins, losses }) => ({ name, total, wins, losses })), [
+      { name: "2026-06", total: 3, wins: 2, losses: 1 },
+      { name: "2026-07", total: 1, wins: 0, losses: 1 }
+    ]);
+  });
+
+  it("calculates staff hand probabilities with an independent denominator per hand", () => {
+    const sessions = [
+      { staffRpsHands: ["rock", "paper", "scissors"] },
+      { staffRpsHands: ["rock", "scissors", ""] },
+      { staffRpsHands: ["paper", "", ""] },
+      { staffRpsHands: [] }
+    ];
+    assert.deepEqual(getStaffRpsBreakdown(sessions), [
+      {
+        position: 1,
+        total: 3,
+        rows: [
+          { key: "rock", label: "グー", total: 2, percentage: 66.7 },
+          { key: "paper", label: "パー", total: 1, percentage: 33.3 },
+          { key: "scissors", label: "チョキ", total: 0, percentage: 0 }
+        ]
+      },
+      {
+        position: 2,
+        total: 2,
+        rows: [
+          { key: "rock", label: "グー", total: 0, percentage: 0 },
+          { key: "paper", label: "パー", total: 1, percentage: 50 },
+          { key: "scissors", label: "チョキ", total: 1, percentage: 50 }
+        ]
+      },
+      {
+        position: 3,
+        total: 1,
+        rows: [
+          { key: "rock", label: "グー", total: 0, percentage: 0 },
+          { key: "paper", label: "パー", total: 0, percentage: 0 },
+          { key: "scissors", label: "チョキ", total: 1, percentage: 100 }
+        ]
+      }
     ]);
   });
 });

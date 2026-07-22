@@ -38,7 +38,7 @@ function groupedBreakdown(matches, key) {
   const groups = new Map();
 
   matches.forEach((match) => {
-    const name = match[key]?.trim() || "未設定";
+    const name = groupName(match, key);
     const current = groups.get(name) || { name, total: 0, wins: 0, losses: 0, draws: 0 };
     current.total += 1;
     if (match.result === "win") {
@@ -59,12 +59,21 @@ function groupedBreakdown(matches, key) {
     .sort((a, b) => b.total - a.total || b.winRate - a.winRate || a.name.localeCompare(b.name, "ja"));
 }
 
+function groupName(match, key) {
+  if (key === "month") return String(match.date || "").slice(0, 7) || "未設定";
+  return String(match[key] || "").trim() || "未設定";
+}
+
 const rpsOptions = [
   ["rock", "グー"],
   ["paper", "パー"],
   ["scissors", "チョキ"],
   ["unknown", "未記録"]
 ];
+
+export function canWinRandomPrize(placement = "") {
+  return placement !== "champion";
+}
 
 export function summarizeMatches(matches = []) {
   const total = tally(matches);
@@ -105,7 +114,7 @@ export function getOpponentTurnBreakdown(matches = []) {
 
 export function getCrossBreakdown(matches = [], key = "opponentDeck") {
   return groupedBreakdown(matches, key).map((row) => {
-    const rowMatches = matches.filter((match) => (match[key]?.trim() || "未設定") === row.name);
+    const rowMatches = matches.filter((match) => groupName(match, key) === row.name);
     return {
       ...row,
       first: tally(rowMatches, (match) => match.firstPlayer === "first"),
@@ -114,6 +123,28 @@ export function getCrossBreakdown(matches = [], key = "opponentDeck") {
       myAnyPass: tally(rowMatches, (match) => isPass(match.myPassed)),
       opponentNoPass: tally(rowMatches, (match) => !isPass(match.opponentPassed)),
       opponentAnyPass: tally(rowMatches, (match) => isPass(match.opponentPassed))
+    };
+  });
+}
+
+export function filterMatchesByMonth(matches = [], month = "") {
+  if (!month) return matches;
+  return matches.filter((match) => String(match.date || "").slice(0, 7) === month);
+}
+
+export function getStaffRpsBreakdown(sessions = []) {
+  const options = rpsOptions.filter(([key]) => key !== "unknown");
+  return [0, 1, 2].map((index) => {
+    const hands = sessions
+      .map((session) => session.staffRpsHands?.[index])
+      .filter((hand) => options.some(([key]) => key === hand));
+    return {
+      position: index + 1,
+      total: hands.length,
+      rows: options.map(([key, label]) => {
+        const total = hands.filter((hand) => hand === key).length;
+        return { key, label, total, percentage: rate(total, hands.length) };
+      })
     };
   });
 }
