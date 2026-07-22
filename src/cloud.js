@@ -77,17 +77,43 @@ export async function loadCloudState() {
   return data;
 }
 
-export async function saveCloudState(appState) {
+export async function saveCloudState(appState, options = {}) {
   const supabase = await getClient();
   const userId = requireUserId();
+  const { expectedUpdatedAt = null, force = false } = options;
   const payload = {
     user_id: userId,
     data: appState,
     updated_at: new Date().toISOString()
   };
-  const { error } = await supabase.from(tableName).upsert(payload, { onConflict: "user_id" });
+
+  if (force) {
+    const { error } = await supabase.from(tableName).upsert(payload, { onConflict: "user_id" });
+    if (error) throw error;
+    return payload.updated_at;
+  }
+
+  if (!expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .insert(payload)
+      .select("updated_at")
+      .maybeSingle();
+    if (error?.code === "23505") throw cloudConflictError();
+    if (error) throw error;
+    return data?.updated_at || payload.updated_at;
+  }
+
+  const { data, error } = await supabase
+    .from(tableName)
+    .update(payload)
+    .eq("user_id", userId)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("updated_at")
+    .maybeSingle();
   if (error) throw error;
-  return payload.updated_at;
+  if (!data) throw cloudConflictError();
+  return data.updated_at || payload.updated_at;
 }
 
 export function cloudSnapshot(mode = "ready") {
@@ -123,4 +149,10 @@ function requireUserId() {
   const userId = currentSession?.user?.id;
   if (!userId) throw new Error("ログインしてください");
   return userId;
+}
+
+function cloudConflictError() {
+  const error = new Error("別の端末で新しいデータが保存されています");
+  error.code = "CLOUD_CONFLICT";
+  return error;
 }

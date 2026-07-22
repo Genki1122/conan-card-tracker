@@ -210,8 +210,10 @@ describe("session and player analytics", () => {
       worstMatchup: { name: "白黄王冠", total: 1, wins: 0, losses: 1, draws: 0, winRate: 0 },
       turnGap: { stronger: "first", weaker: "second", gap: 0 },
       passRecord: {
-        noPass: { total: 2, wins: 1, winRate: 50 },
-        anyPass: { total: 2, wins: 1, winRate: 50 }
+        myNoPass: { total: 3, wins: 2, winRate: 66.7 },
+        myAnyPass: { total: 1, wins: 0, winRate: 0 },
+        opponentNoPass: { total: 3, wins: 1, winRate: 33.3 },
+        opponentAnyPass: { total: 1, wins: 1, winRate: 100 }
       }
     });
   });
@@ -262,8 +264,10 @@ describe("session and player analytics", () => {
         winRate: 100,
         first: { total: 1, wins: 1, winRate: 100 },
         second: { total: 1, wins: 1, winRate: 100 },
-        noPass: { total: 1, wins: 1, winRate: 100 },
-        anyPass: { total: 1, wins: 1, winRate: 100 }
+        myNoPass: { total: 2, wins: 2, winRate: 100 },
+        myAnyPass: { total: 0, wins: 0, winRate: 0 },
+        opponentNoPass: { total: 1, wins: 1, winRate: 100 },
+        opponentAnyPass: { total: 1, wins: 1, winRate: 100 }
       },
       {
         name: "白黄王冠",
@@ -274,8 +278,10 @@ describe("session and player analytics", () => {
         winRate: 0,
         first: { total: 0, wins: 0, winRate: 0 },
         second: { total: 1, wins: 0, winRate: 0 },
-        noPass: { total: 0, wins: 0, winRate: 0 },
-        anyPass: { total: 1, wins: 0, winRate: 0 }
+        myNoPass: { total: 0, wins: 0, winRate: 0 },
+        myAnyPass: { total: 1, wins: 0, winRate: 0 },
+        opponentNoPass: { total: 1, wins: 0, winRate: 0 },
+        opponentAnyPass: { total: 0, wins: 0, winRate: 0 }
       },
       {
         name: "緑服部",
@@ -286,8 +292,10 @@ describe("session and player analytics", () => {
         winRate: 0,
         first: { total: 1, wins: 0, winRate: 0 },
         second: { total: 0, wins: 0, winRate: 0 },
-        noPass: { total: 1, wins: 0, winRate: 0 },
-        anyPass: { total: 0, wins: 0, winRate: 0 }
+        myNoPass: { total: 1, wins: 0, winRate: 0 },
+        myAnyPass: { total: 0, wins: 0, winRate: 0 },
+        opponentNoPass: { total: 1, wins: 0, winRate: 0 },
+        opponentAnyPass: { total: 0, wins: 0, winRate: 0 }
       }
     ]);
   });

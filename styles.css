@@ -257,7 +257,8 @@ button {
 
 .breakdown-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(112px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(112px, 1fr);
   gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -897,6 +898,21 @@ label {
 .cloud-actions {
   display: grid;
   gap: 8px;
+}
+
+.sync-conflict {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(229, 185, 73, 0.62);
+  border-radius: 12px;
+  background: rgba(229, 185, 73, 0.12);
+}
+
+.sync-conflict span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .ghost-action {

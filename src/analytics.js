@@ -110,8 +110,10 @@ export function getCrossBreakdown(matches = [], key = "opponentDeck") {
       ...row,
       first: tally(rowMatches, (match) => match.firstPlayer === "first"),
       second: tally(rowMatches, (match) => match.firstPlayer === "second"),
-      noPass: tally(rowMatches, (match) => !hasAnyPass(match)),
-      anyPass: tally(rowMatches, hasAnyPass)
+      myNoPass: tally(rowMatches, (match) => !isPass(match.myPassed)),
+      myAnyPass: tally(rowMatches, (match) => isPass(match.myPassed)),
+      opponentNoPass: tally(rowMatches, (match) => !isPass(match.opponentPassed)),
+      opponentAnyPass: tally(rowMatches, (match) => isPass(match.opponentPassed))
     };
   });
 }
@@ -193,13 +195,14 @@ export function getAnalysisInsights(matches = []) {
     worstMatchup,
     turnGap: { stronger, weaker, gap },
     passRecord: {
-      noPass: tally(matches, (match) => !hasAnyPass(match)),
-      anyPass: tally(matches, hasAnyPass)
+      myNoPass: tally(matches, (match) => !isPass(match.myPassed)),
+      myAnyPass: tally(matches, (match) => isPass(match.myPassed)),
+      opponentNoPass: tally(matches, (match) => !isPass(match.opponentPassed)),
+      opponentAnyPass: tally(matches, (match) => isPass(match.opponentPassed))
     }
   };
 }
 
-function hasAnyPass(match) {
-  return !["none", false, "false", undefined, null, ""].includes(match.myPassed)
-    || !["none", false, "false", undefined, null, ""].includes(match.opponentPassed);
+function isPass(value) {
+  return !["none", false, "false", undefined, null, ""].includes(value);
 }
