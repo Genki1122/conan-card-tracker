@@ -24,6 +24,7 @@ import {
   validateUsername
 } from "./onboarding.js";
 import { buildAdminOverview, buildAiTrainingDataset } from "./admin-analytics.js";
+import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
 import {
   cloudSnapshot,
   getCloudConfig,
@@ -31,6 +32,7 @@ import {
   isCloudConfigured,
   loadAccountContext,
   loadAdminData,
+  loadAdminUserState,
   loadCloudState,
   saveAccountSetup,
   saveCloudConfig,
@@ -42,7 +44,7 @@ import {
 const storageKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaStorageKey = "conan-card-tracker-sync-meta-v1";
-const termsVersion = "2026-07-22-v1";
+const termsVersion = "2026-07-23-v2";
 
 const view = document.querySelector("#appView");
 const phoneShell = document.querySelector(".phone-shell");
@@ -85,6 +87,8 @@ let cloudConflict = false;
 let pendingRemoteState = null;
 let accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
 let adminState = { loading: false, error: "", data: null, raw: null };
+let adminPreview = null;
+let registrationFeedback = null;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
@@ -249,13 +253,14 @@ function normalizePlayerName(value) {
 }
 
 function saveState() {
+  if (adminPreview) return;
   localStorage.setItem(storageKey, JSON.stringify(state));
   markLocalDirty();
   scheduleCloudSave();
 }
 
 function scheduleCloudSave() {
-  if (!cloudStatus.signedIn || cloudConflict) return;
+  if (adminPreview || !cloudStatus.signedIn || cloudConflict) return;
   window.clearTimeout(cloudSaveTimer);
   if (!navigator.onLine) {
     cloudMessage = "オフライン・未同期";
@@ -268,7 +273,7 @@ function scheduleCloudSave() {
 }
 
 async function flushCloudSave() {
-  if (!cloudStatus.signedIn || cloudConflict) return;
+  if (adminPreview || !cloudStatus.signedIn || cloudConflict) return;
   if (cloudSaveInFlight) {
     cloudSavePending = true;
     return;
@@ -310,6 +315,11 @@ function rerenderOpenMenu() {
 
 function renderSyncStatus() {
   if (!syncStatusLabel) return;
+  if (adminPreview) {
+    syncStatusLabel.textContent = `${adminPreview.username}・閲覧専用`;
+    syncStatusLabel.dataset.tone = "preview";
+    return;
+  }
   let text = "端末保存";
   let tone = "local";
   if (!navigator.onLine) {
@@ -633,7 +643,7 @@ function renderSession(sessionId) {
   view.innerHTML = `
     <section class="session-compact-head">
       <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b></div>
-      <button type="button" data-edit-session="${session.id}">編集</button>
+      ${adminPreview ? `<span class="read-only-badge">閲覧専用</span>` : `<button type="button" data-edit-session="${session.id}">編集</button>`}
       <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
       ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
     </section>
@@ -641,14 +651,14 @@ function renderSession(sessionId) {
     <div class="list-stack">
       ${rounds.map((match, index) => `
         <article class="round-card compact-round">
-          <button class="round-main" type="button" data-edit-match="${match.id}">
+          <${adminPreview ? "div" : "button"} class="round-main" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
             <span class="badge">${index + 1}</span>
             <span>
               <strong class="round-title">${escapeHtml(match.opponentDeck)}</strong>
               <span class="round-meta"><span>${firstLabels[match.firstPlayer]}</span></span>
             </span>
             <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-          </button>
+          </${adminPreview ? "div" : "button"}>
           <details class="round-extra">
             <summary>詳細</summary>
             <div class="detail-grid">
@@ -656,7 +666,7 @@ function renderSession(sessionId) {
               <span>じゃんけん: 相手${rpsLabels[match.opponentRps]}</span>
               <span>パス 自分:${passLabel(match.myPassed)} 相手:${passLabel(match.opponentPassed)}</span>
               ${match.memo ? `<span>メモ: ${escapeHtml(match.memo)}</span>` : ""}
-              <button class="text-button" type="button" data-edit-match="${match.id}">編集する</button>
+              ${adminPreview ? "" : `<button class="text-button" type="button" data-edit-match="${match.id}">編集する</button>`}
             </div>
           </details>
         </article>
@@ -799,7 +809,7 @@ function renderPlayers() {
     view.innerHTML = `
       <div class="player-detail-period"><span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}</span><strong>${record.total}戦</strong></div>
       ${summaryCard(record, [`最終 ${formatDate(latest?.date)}`, `${record.total}戦`], true)}
-      <div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>
+      ${adminPreview ? "" : `<div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>`}
       <section class="player-first-look">
         <div><strong>じゃんけん傾向</strong>${playerRpsMarkup(rps)}</div>
         <div class="recent-player-decks"><strong>最近の相手デッキ</strong><span>${recentDecks.map((name) => `<i>${escapeHtml(name)}</i>`).join("") || "記録なし"}</span></div>
@@ -811,13 +821,13 @@ function renderPlayers() {
         ${enriched.map((match) => {
           const session = getSession(match.sessionId);
           return `
-            <button class="player-history-card" type="button" data-edit-match="${match.id}">
+            <${adminPreview ? "article" : "button"} class="player-history-card" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
               <span class="player-history-copy">
                 <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${escapeHtml(match.opponentDeck)}</strong>
                 <span>${escapeHtml(session?.name || "")}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
               </span>
               <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-            </button>
+            </${adminPreview ? "article" : "button"}>
           `;
         }).join("")}
       </div>
@@ -962,11 +972,11 @@ function renderAdmin() {
     <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
     <div class="admin-user-list">
       ${overview.userRows.map((row) => `
-        <article class="admin-user-row">
+        <button class="admin-user-row" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
           <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span></div>
           <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
-          <i class="${row.consented ? "accepted" : ""}">${row.consented ? "同意済" : "未同意"}</i>
-        </article>
+          <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
+        </button>
       `).join("") || `<div class="empty-card">利用者データがありません</div>`}
     </div>
   `;
@@ -989,11 +999,12 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
-  const hasBackButton = ["deckDetail", "session", "playerDetail", "storeDetail", "admin"].includes(route.name);
+  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "admin"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
+  phoneShell.classList.toggle("admin-preview-mode", Boolean(adminPreview));
   topBar.classList.toggle("root-header", !hasBackButton);
   backButton.style.visibility = hasBackButton ? "visible" : "hidden";
-  fabButton.hidden = route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || route.name === "admin" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
+  fabButton.hidden = Boolean(adminPreview) || route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || route.name === "admin" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
@@ -1167,6 +1178,7 @@ function openDialog(mode, targetId = null) {
 entryForm.addEventListener("submit", (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
+  if (adminPreview) return;
   const data = new FormData(entryForm);
 
   if (dialogMode === "deck") {
@@ -1256,6 +1268,11 @@ view.addEventListener("click", (event) => {
     loadAdminDashboard();
     return;
   }
+  const adminUserButton = event.target.closest("[data-open-admin-user]");
+  if (adminUserButton) {
+    openAdminUserPreview(adminUserButton.dataset.openAdminUser);
+    return;
+  }
   if (event.target.closest("[data-copy-ai-dataset]")) {
     if (!adminState.raw) return;
     navigator.clipboard?.writeText(JSON.stringify(buildAiTrainingDataset(adminState.raw), null, 2));
@@ -1278,10 +1295,10 @@ view.addEventListener("click", (event) => {
   if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck, returnDeckView: route.deckView || "active" });
   if (sessionButton) setRoute({ name: "session", sessionId: sessionButton.dataset.openSession, returnStore: route.name === "storeDetail" ? route.storeName : "", returnAfterStore: route.name === "storeDetail" ? route.returnRoute : null });
   if (playerButton) setRoute({ ...route, name: "playerDetail", playerName: playerButton.dataset.openPlayer });
-  if (editButton) openDialog("match", editButton.dataset.editMatch);
-  if (editSessionButton) openDialog("session", editSessionButton.dataset.editSession);
+  if (editButton && !adminPreview) openDialog("match", editButton.dataset.editMatch);
+  if (editSessionButton && !adminPreview) openDialog("session", editSessionButton.dataset.editSession);
   if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot }));
-  if (renamePlayerButton) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
+  if (renamePlayerButton && !adminPreview) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
   if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
   if (deckViewButton) setRoute({ name: "decks", deckView: deckViewButton.dataset.deckView === "archived" ? "archived" : "active" });
   if (tournamentViewButton) setRoute({ name: "sessions", view: tournamentViewButton.dataset.tournamentView });
@@ -1336,6 +1353,12 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-admin-preview]")) {
+    dialog.close();
+    closeAdminUserPreview();
+    return;
+  }
+
   if (event.target.closest("[data-open-guide]")) {
     window.location.href = "./guide.html";
     return;
@@ -1400,13 +1423,21 @@ dialogFields.addEventListener("click", (event) => {
     button.textContent = "メール送信中...";
     signInWithEmail(email, { username, termsVersion })
       .then(() => {
-        cloudMessage = "メールを送信しました。届いたメール内のリンクを開いてください";
+        registrationFeedback = { email, username };
+        cloudMessage = "";
         openDialog("cloudSettings");
       })
       .catch((error) => {
         cloudMessage = `ログイン失敗: ${error.message}`;
         openDialog("cloudSettings");
       });
+    return;
+  }
+
+  if (event.target.closest("[data-reset-registration]")) {
+    registrationFeedback = null;
+    cloudMessage = "";
+    openDialog("cloudSettings");
     return;
   }
 
@@ -1635,6 +1666,7 @@ dialogFields.addEventListener("click", (event) => {
 });
 
 fabButton.addEventListener("click", () => {
+  if (adminPreview) return;
   if (route.name === "decks") openDialog("deck");
   if (route.name === "deckDetail") openDialog("session");
   if (route.name === "sessions") openDialog("session");
@@ -1642,6 +1674,10 @@ fabButton.addEventListener("click", () => {
 });
 
 backButton.addEventListener("click", () => {
+  if (adminPreview && ["decks", "summary", "players", "sessions"].includes(route.name)) {
+    closeAdminUserPreview();
+    return;
+  }
   if (route.name === "deckDetail") setRoute({ name: "decks", deckView: route.returnDeckView || "active" });
   if (route.name === "session") {
     const session = getSession(route.sessionId);
@@ -1666,6 +1702,7 @@ window.addEventListener("offline", renderSyncStatus);
 
 async function handleOnlineRecovery() {
   renderSyncStatus();
+  if (adminPreview) return;
   if (isCloudConfigured() && !cloudStatus.signedIn) {
     await refreshCloudSession();
     return;
@@ -1772,6 +1809,7 @@ async function refreshCloudSession() {
       rerenderOpenMenu();
     });
     if (cloudStatus.signedIn) {
+      registrationFeedback = null;
       try {
         accountContext = await loadAccountContext();
       } catch (error) {
@@ -1804,6 +1842,40 @@ async function loadAdminDashboard() {
     adminState = { loading: false, error: `管理データの読込に失敗しました: ${error.message}`, data: null, raw: null };
   }
   if (route.name === "admin") render();
+}
+
+async function openAdminUserPreview(userId) {
+  if (accountContext.role !== "superadmin" || adminPreview) return;
+  const user = adminState.data?.userRows.find((row) => row.userId === userId);
+  if (!user) return;
+  adminState = { ...adminState, previewLoadingUserId: userId };
+  render();
+  try {
+    window.clearTimeout(cloudSaveTimer);
+    const remote = await loadAdminUserState(userId);
+    adminPreview = beginAdminPreview(state, user, remote);
+    state = normalizeState(adminPreview.viewedState);
+    route = { name: "decks" };
+    dialog.close();
+    render();
+  } catch (error) {
+    adminState = {
+      ...adminState,
+      previewLoadingUserId: "",
+      error: `利用者データの読込に失敗しました: ${error.message}`
+    };
+    render();
+  }
+}
+
+function closeAdminUserPreview() {
+  if (!adminPreview) return;
+  state = endAdminPreview(adminPreview);
+  adminPreview = null;
+  adminState = { ...adminState, previewLoadingUserId: "", error: "" };
+  route = { name: "admin" };
+  render();
+  if (localDirty) scheduleCloudSave();
 }
 
 async function pullCloudState(options = {}) {
@@ -1988,7 +2060,7 @@ function cloudMenuMarkup() {
           <button class="primary-button inline-action" type="button" data-save-cloud-config>Supabase設定を保存</button>
         </details>
       `}
-      ${cloudStatus.configured && !cloudStatus.signedIn ? `
+      ${cloudStatus.configured && !cloudStatus.signedIn ? registrationFeedback ? registrationSentMarkup() : `
         <div class="account-intro">
           <strong>無料でユーザー登録</strong>
           <span>ユーザー名とメールアドレスを登録します。</span>
@@ -2050,9 +2122,22 @@ function termsDisclosureMarkup() {
   return `
     <details class="terms-disclosure">
       <summary>利用上の注意</summary>
-      <p>記録はサービス運営、統計分析、管理者による利用傾向の把握、AIモデルの学習・評価に利用します。AI用データからメールアドレス、ユーザー名、対戦相手名、メモは除外します。</p>
+      <p>記録はサービス運営、統計分析、管理者による利用者別の記録確認・利用傾向の把握、AIモデルの学習・評価に利用します。AI用データからメールアドレス等個人情報は除外します。</p>
       <div><a href="./terms.html" target="_blank" rel="noopener">利用規約</a><a href="./privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a></div>
     </details>
+  `;
+}
+
+function registrationSentMarkup() {
+  return `
+    <section class="registration-sent" role="status">
+      <span class="registration-sent-mark">✓</span>
+      <strong>登録メールを送信しました</strong>
+      <b>${escapeHtml(registrationFeedback.email)}</b>
+      <p>メール内の「メールアドレスを確認する」を押すと登録が完了します。</p>
+      <small>届かない場合は、迷惑メールフォルダと入力したアドレスを確認してください。</small>
+      <button class="primary-button inline-action ghost-action" type="button" data-reset-registration>入力画面に戻る</button>
+    </section>
   `;
 }
 
@@ -2061,6 +2146,16 @@ function syncChoiceMarkup(label, summary) {
 }
 
 function menuRowsMarkup() {
+  if (adminPreview) {
+    return `
+      <button type="button" data-close-admin-preview>
+        <span>管理者画面へ戻る</span>
+        <small>${escapeHtml(adminPreview.username)}の記録を閲覧中</small>
+        <b>›</b>
+      </button>
+      <div class="read-only-menu-note">閲覧専用のため、追加・編集・削除・同期操作はできません。</div>
+    `;
+  }
   const pageRow = route.name === "deckDetail"
     ? `<button type="button" data-open-menu-panel="deckSettings"><span>デッキ設定</span><small>名前・バージョン・アーカイブ</small><b>›</b></button>`
     : route.name === "session"

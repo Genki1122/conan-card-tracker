@@ -35,6 +35,8 @@ python3 -m http.server 4174
 
 `0harry0wilder0@gmail.com` で登録した利用者には `superadmin` が付与され、3点メニューから管理者画面を開けます。管理画面はRLSで保護され、一般利用者からは表示・参照できません。
 
+管理者は利用者一覧から対象者を選び、その利用者のデッキ・分析・プレイヤー・大会画面を閲覧専用で確認できます。既に初回の `schema.sql` を実行済みの場合は、追加で `supabase/admin-preview-migration.sql` を実行します。
+
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。
 
 ## 友人へ共有する場合

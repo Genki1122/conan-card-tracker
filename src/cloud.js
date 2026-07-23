@@ -120,6 +120,16 @@ export async function loadAdminData() {
   };
 }
 
+export async function loadAdminUserState(userId) {
+  const supabase = await getClient();
+  requireUserId();
+  const { data, error } = await supabase.rpc("get_admin_user_state", {
+    target_user_id: userId
+  });
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
 export async function signOutCloud() {
   const supabase = await getClient();
   const { error } = await supabase.auth.signOut();

@@ -13,6 +13,13 @@ Supabase Dashboardの `Authentication > Email Templates` で設定します。
 
 テンプレート内の `{{ .ConfirmationURL }}` は変更しません。
 
+### Dashboardへ反映
+
+1. `Authentication > Email Templates` を開きます。
+2. `Confirm signup` を開き、SubjectとBodyを上記内容へ差し替えて保存します。
+3. `Magic Link` も同様に差し替えて保存します。
+4. 新規登録画面から自分の別メールアドレスへ送信し、日本語の件名・本文・遷移先を確認します。
+
 ## Custom SMTP
 
 友人へ公開する場合、Supabase標準メールは試用向けの制限があるためCustom SMTPを設定します。Dashboardの `Project Settings > Authentication > SMTP Settings` で有効化し、利用するメール配信サービスから次の値を入力します。
