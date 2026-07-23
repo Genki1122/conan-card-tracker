@@ -25,6 +25,7 @@ import {
 } from "./onboarding.js";
 import { buildAdminOverview, buildAiTrainingDataset } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
+import { authEmailErrorMessage } from "./auth-feedback.js";
 import {
   cloudSnapshot,
   getCloudConfig,
@@ -1428,7 +1429,7 @@ dialogFields.addEventListener("click", (event) => {
         openDialog("cloudSettings");
       })
       .catch((error) => {
-        cloudMessage = `ログイン失敗: ${error.message}`;
+        cloudMessage = authEmailErrorMessage(error);
         openDialog("cloudSettings");
       });
     return;
@@ -1459,7 +1460,7 @@ dialogFields.addEventListener("click", (event) => {
         openDialog("cloudSettings");
       })
       .catch((error) => {
-        cloudMessage = `ログイン失敗: ${error.message}`;
+        cloudMessage = authEmailErrorMessage(error);
         openDialog("cloudSettings");
       });
     return;
@@ -2047,7 +2048,7 @@ function cloudMenuMarkup() {
         <strong>${cloudStatus.signedIn ? "クラウド同期" : "アカウント"}</strong>
         <span>${escapeHtml(statusText)}</span>
       </div>
-      ${cloudMessage ? `<p class="cloud-message">${escapeHtml(cloudMessage)}</p>` : ""}
+      ${cloudMessage ? `<p class="cloud-message" role="alert">${escapeHtml(cloudMessage)}</p>` : ""}
       ${cloudStatus.configured ? "" : `
         <div class="account-intro">
           <strong>現在ユーザー登録を利用できません</strong>
