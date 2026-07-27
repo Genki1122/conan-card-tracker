@@ -36,6 +36,17 @@ import {
   updateSessionDeck
 } from "./data-operations.js";
 import {
+  caseCardColorLabel,
+  caseCardsForPartnerColor,
+  findCaseCardByName,
+  getCaseCard,
+  isCaseCardAvailableForPartnerColor,
+  normalizePartnerColor,
+  partnerColorLabel,
+  partnerColors
+} from "./card-catalog.js";
+import { shouldUpdateSearchFromInput } from "./ime-input.js";
+import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
   deleteEnvironmentCatalogItem,
@@ -256,7 +267,9 @@ function normalizeState(rawState) {
       version: deck.version || "v1",
       archived: Boolean(deck.archived),
       createdAt: deck.createdAt || dates.sort()[0] || "1970-01-01",
-      lastUsedAt: deck.lastUsedAt || dates.sort().at(-1) || ""
+      lastUsedAt: deck.lastUsedAt || dates.sort().at(-1) || "",
+      partnerColor: normalizePartnerColor(deck.partnerColor),
+      caseCardId: String(deck.caseCardId || "")
     };
   });
   const deckVersions = new Map(decks.map((deck) => [deck.id, deck.version]));
@@ -267,6 +280,8 @@ function normalizeState(rawState) {
       ...session,
       environment: normalizeEnvironmentName(session.environment),
       deckVersion: session.deckVersion || deckVersions.get(session.deckId) || "v1",
+      partnerColor: normalizePartnerColor(session.partnerColor),
+      caseCardId: String(session.caseCardId || ""),
       placement: session.placement || "",
       placementNote: session.placementNote || "",
       randomPrizeWon: canWinRandomPrize(session.placement) ? Boolean(session.randomPrizeWon) : false,
@@ -277,7 +292,9 @@ function normalizeState(rawState) {
     environments: uniqueValues([...(rawState.environments || []).map(normalizeEnvironmentName), ...sessionEnvironments]),
     matches: (rawState.matches || []).map((match) => ({
       ...match,
-      opponentPlayer: normalizePlayerName(match.opponentPlayer)
+      opponentPlayer: normalizePlayerName(match.opponentPlayer),
+      opponentPartnerColor: normalizePartnerColor(match.opponentPartnerColor),
+      opponentCaseCardId: String(match.opponentCaseCardId || "")
     }))
   };
 }
@@ -293,6 +310,8 @@ function migrateLegacyMatches(matches) {
     name,
     version: "v1",
     color: "purple",
+    partnerColor: "",
+    caseCardId: "",
     archived: false,
     createdAt: new Date().toISOString(),
     lastUsedAt: new Date().toISOString()
@@ -301,6 +320,8 @@ function migrateLegacyMatches(matches) {
     id: crypto.randomUUID(),
     deckId: deck.id,
     deckVersion: deck.version,
+    partnerColor: "",
+    caseCardId: "",
     name: "移行データ",
     date: new Date().toISOString().slice(0, 10),
     format: "BO1",
@@ -326,6 +347,8 @@ function migrateLegacyMatches(matches) {
         id: crypto.randomUUID(),
         sessionId: sessionByDeck.get(deck.id).id,
         opponentPlayer: "不明",
+        opponentPartnerColor: "",
+        opponentCaseCardId: "",
         opponentRps: "unknown",
         myPassed: "none",
         opponentPassed: "none"
@@ -764,6 +787,7 @@ function renderSession(sessionId) {
             <summary>詳細</summary>
             <div class="detail-grid">
               <span>相手: ${escapeHtml(normalizePlayerName(match.opponentPlayer))}</span>
+              ${(match.opponentPartnerColor || match.opponentCaseCardId) ? `<span>色・事件: ${escapeHtml(partnerColorLabel(match.opponentPartnerColor))}${match.opponentCaseCardId ? `・${escapeHtml(getCaseCard(match.opponentCaseCardId)?.name || "事件カード未記録")}` : ""}</span>` : ""}
               <span>じゃんけん: 相手${rpsLabels[match.opponentRps]}</span>
               <span>パス 自分:${passLabel(match.myPassed)} 相手:${passLabel(match.opponentPassed)}</span>
               ${match.memo ? `<span>メモ: ${escapeHtml(match.memo)}</span>` : ""}
@@ -951,19 +975,23 @@ function renderPlayers() {
       <label><span>期間</span><select data-player-month aria-label="期間"><option value="">全期間</option>${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}</select></label>
       <label><span>環境</span><select data-player-environment aria-label="環境"><option value="">全環境</option>${environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === selectedEnvironment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
     </div>
-    <div class="list-stack player-list">
-      ${rows.map((row) => `
-        <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
-          <span class="player-list-copy">
-            <strong>${escapeHtml(row.name)}</strong>
-            <span>最終 ${formatDate(row.latestMatch?.date)}・${escapeHtml(row.latestMatch?.opponentDeck || "デッキ不明")}・${escapeHtml(row.latestMatch?.store || "場所不明")}</span>
-            ${query ? playerRpsMarkup(row.recordedRps, true) : ""}
-          </span>
-          <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
-        </button>
-      `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : selectedMonth || selectedEnvironment ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`}
+    <div class="list-stack player-list" data-player-results>
+      ${playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment))}
     </div>
   `;
+}
+
+function playerRowsMarkup(rows, query, hasContextFilter) {
+  return rows.map((row) => `
+    <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
+      <span class="player-list-copy">
+        <strong>${escapeHtml(row.name)}</strong>
+        <span>最終 ${formatDate(row.latestMatch?.date)}・${escapeHtml(row.latestMatch?.opponentDeck || "デッキ不明")}・${escapeHtml(row.latestMatch?.store || "場所不明")}</span>
+        ${query ? playerRpsMarkup(row.recordedRps, true) : ""}
+      </span>
+      <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
+    </button>
+  `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : hasContextFilter ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`;
 }
 
 function playerRpsMarkup(rps, compact = false) {
@@ -1155,6 +1183,8 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = `
       <label>デッキ名<input name="name" required placeholder="例: 高木婚活"></label>
       <label>初期バージョン<input name="version" required value="v1" placeholder="例: v1 / 新弾後"></label>
+      ${partnerColorChoices("partnerColor", "", "deck")}
+      ${caseCardPicker({ inputName: "caseCardName", listId: "deckCaseCardSuggestions", scope: "deck" })}
     `;
   }
 
@@ -1256,14 +1286,22 @@ function openDialog(mode, targetId = null) {
     dialogSubmit.textContent = editingMatch ? "更新" : "保存";
     dialogFields.innerHTML = `
       <input type="hidden" name="myDeck" value="${escapeHtml(editingMatch?.myDeck || deck?.name || "")}">
-      <label>相手デッキ<input name="opponentDeck" list="opponentDeckSuggestions" required placeholder="例: 婚活警視庁" value="${escapeHtml(editingMatch?.opponentDeck || "")}"></label>
+      <label>プレイヤー名<input name="opponentPlayer" list="playerSuggestions" required value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}" placeholder="不明"></label>
       <div class="inline-fields">
         <label>勝敗<select name="result" required>${requiredOptionTags([["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "", "選択")}</select></label>
         <label>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
       </div>
       <details class="match-extra-fields" ${editingMatch ? "open" : ""}>
-        <summary>対戦相手・詳細記録</summary>
-        <label>相手プレイヤーネーム<input name="opponentPlayer" list="playerSuggestions" value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}"></label>
+        <summary>色・事件カード・その他</summary>
+        ${partnerColorChoices("opponentPartnerColor", editingMatch?.opponentPartnerColor || "", "opponent")}
+        ${caseCardPicker({
+          inputName: "opponentCaseCardName",
+          listId: "opponentCaseCardSuggestions",
+          selectedCaseCardId: editingMatch?.opponentCaseCardId || "",
+          partnerColor: editingMatch?.opponentPartnerColor || "",
+          scope: "opponent"
+        })}
+        <label>デッキ名<input name="opponentDeck" list="opponentDeckSuggestions" placeholder="例: 婚活警視庁" value="${escapeHtml(editingMatch?.opponentDeck === "不明" ? "" : editingMatch?.opponentDeck || "")}"></label>
         <label>じゃんけんで相手の出した手<select name="opponentRps">${optionTags([["unknown", "未記録"], ["rock", "グー"], ["scissors", "チョキ"], ["paper", "パー"]], editingMatch?.opponentRps || "unknown")}</select></label>
         <div class="inline-fields">
           <label>自分のパス<select name="myPassed">${passOptions(editingMatch?.myPassed || "none")}</select></label>
@@ -1288,11 +1326,16 @@ entryForm.addEventListener("submit", (event) => {
 
   if (dialogMode === "deck") {
     const now = new Date().toISOString();
+    const partnerColor = normalizePartnerColor(data.get("partnerColor"));
+    const caseCardId = selectedCaseCardId("caseCardName", partnerColor);
+    if (caseCardId === null) return;
     const deck = {
       id: crypto.randomUUID(),
       name: data.get("name").trim(),
       version: data.get("version").trim() || "v1",
       color: "purple",
+      partnerColor,
+      caseCardId,
       archived: false,
       createdAt: now,
       lastUsedAt: now
@@ -1312,11 +1355,14 @@ entryForm.addEventListener("submit", (event) => {
   if (dialogMode === "session") {
     const selectedDeck = getDeck(data.get("deckId"));
     const currentSession = editingSessionId ? getSession(editingSessionId) : null;
+    const keepsDeckMetadata = currentSession?.deckId === data.get("deckId");
     const randomPrizeMethod = data.get("randomPrizeMethod") || "";
     const session = {
       id: editingSessionId || crypto.randomUUID(),
       deckId: data.get("deckId"),
       deckVersion: data.get("deckVersion")?.trim() || selectedDeck?.version || "v1",
+      partnerColor: keepsDeckMetadata ? currentSession.partnerColor : selectedDeck?.partnerColor || "",
+      caseCardId: keepsDeckMetadata ? currentSession.caseCardId : selectedDeck?.caseCardId || "",
       name: data.get("name").trim(),
       date: data.get("date"),
       format: data.get("format"),
@@ -1343,12 +1389,17 @@ entryForm.addEventListener("submit", (event) => {
   }
 
   if (dialogMode === "match") {
+    const opponentPartnerColor = normalizePartnerColor(data.get("opponentPartnerColor"));
+    const opponentCaseCardId = selectedCaseCardId("opponentCaseCardName", opponentPartnerColor);
+    if (opponentCaseCardId === null) return;
     const nextMatch = {
       id: crypto.randomUUID(),
       sessionId: route.sessionId,
       myDeck: data.get("myDeck").trim(),
-      opponentDeck: data.get("opponentDeck").trim(),
+      opponentDeck: data.get("opponentDeck").trim() || "不明",
       opponentPlayer: normalizePlayerName(data.get("opponentPlayer")),
+      opponentPartnerColor,
+      opponentCaseCardId,
       result: data.get("result"),
       firstPlayer: data.get("firstPlayer"),
       opponentRps: data.get("opponentRps"),
@@ -1435,19 +1486,40 @@ view.addEventListener("change", (event) => {
   if (playerEnvironment) setRoute({ ...route, name: "players", playerName: "", playerEnvironment: playerEnvironment.value });
 });
 
+function updatePlayerSearchResults(search) {
+  route = { ...route, name: "players", playerName: "", playerQuery: search.value };
+  const selectedMonth = analysisMonths().includes(route.playerMonth) ? route.playerMonth : "";
+  const environments = environmentOptions();
+  const selectedEnvironment = environments.includes(route.playerEnvironment) ? route.playerEnvironment : "";
+  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(enrichMatches(state.matches), selectedMonth), selectedEnvironment);
+  const query = String(search.value || "").trim().toLocaleLowerCase("ja");
+  const sortKey = ["latest", "matches", "winRate", "name"].includes(route.playerSort) ? route.playerSort : "latest";
+  const direction = route.playerDirection === "asc" ? "asc" : "desc";
+  const rows = sortPlayerOverviews(
+    getPlayerOverviews(periodMatches).filter((row) => row.name.toLocaleLowerCase("ja").includes(query)),
+    sortKey,
+    direction
+  );
+  const results = view.querySelector("[data-player-results]");
+  if (results) results.innerHTML = playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment));
+}
+
 view.addEventListener("input", (event) => {
   const search = event.target.closest("[data-player-search]");
-  if (!search) return;
-  route = { ...route, name: "players", playerName: "", playerQuery: search.value };
-  renderPlayers();
-  queueMicrotask(() => {
-    const nextSearch = view.querySelector("[data-player-search]");
-    nextSearch?.focus();
-    nextSearch?.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
-  });
+  if (!search || !shouldUpdateSearchFromInput(event)) return;
+  updatePlayerSearchResults(search);
+});
+
+view.addEventListener("compositionend", (event) => {
+  const search = event.target.closest("[data-player-search]");
+  if (search) updatePlayerSearchResults(search);
 });
 
 dialogFields.addEventListener("change", (event) => {
+  const partnerColorInput = event.target.closest("[data-partner-color-input]");
+  if (partnerColorInput) {
+    updateCaseCardPicker(partnerColorInput.dataset.partnerColorInput, partnerColorInput.value);
+  }
   const placement = event.target.closest("[data-placement-select]");
   if (!placement) return;
   const prize = dialogFields.querySelector("input[name='randomPrizeWon']");
@@ -1809,9 +1881,12 @@ dialogFields.addEventListener("click", (event) => {
     const deck = getDeck(event.target.closest("[data-update-deck]").dataset.updateDeck);
     const name = dialogFields.querySelector("input[name='deckName']")?.value.trim();
     const version = dialogFields.querySelector("input[name='deckVersion']")?.value.trim();
+    const partnerColor = normalizePartnerColor(dialogFields.querySelector("input[name='deckPartnerColor']:checked")?.value);
+    const caseCardId = selectedCaseCardId("deckCaseCardName", partnerColor);
+    if (caseCardId === null) return;
     if (!deck || !name || !version) return;
     const sessionIds = new Set(sessionsForDeck(deck.id).map((session) => session.id));
-    state.decks = state.decks.map((item) => item.id === deck.id ? { ...item, name, version } : item);
+    state.decks = state.decks.map((item) => item.id === deck.id ? { ...item, name, version, partnerColor, caseCardId } : item);
     state.matches = state.matches.map((match) => sessionIds.has(match.sessionId) ? { ...match, myDeck: name } : match);
     saveState();
     title.textContent = name;
@@ -1944,6 +2019,72 @@ function passOptions(selected = "none") {
     ["pass3", "3パス"],
     ["pass12", "1&2パス"]
   ].map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function partnerColorChoices(name, selected = "", scope = "") {
+  const normalized = normalizePartnerColor(selected);
+  return `
+    <fieldset class="partner-color-field">
+      <legend>パートナーの色</legend>
+      <div class="partner-color-choices" role="radiogroup" aria-label="パートナーの色">
+        <label class="partner-color-choice unrecorded" title="未記録">
+          <input type="radio" name="${name}" value="" data-partner-color-input="${scope}" ${normalized ? "" : "checked"}>
+          <span>未</span>
+        </label>
+        ${partnerColors.map((color) => `
+          <label class="partner-color-choice ${color.id}" title="${color.label}">
+            <input type="radio" name="${name}" value="${color.id}" data-partner-color-input="${scope}" ${normalized === color.id ? "checked" : ""}>
+            <span>${color.label}</span>
+          </label>
+        `).join("")}
+      </div>
+    </fieldset>
+  `;
+}
+
+function caseCardPicker({ inputName, listId, selectedCaseCardId = "", partnerColor = "", scope = "" }) {
+  const color = normalizePartnerColor(partnerColor);
+  const candidates = caseCardsForPartnerColor(color);
+  const selectedCard = getCaseCard(selectedCaseCardId);
+  const selectedName = selectedCard && isCaseCardAvailableForPartnerColor(selectedCard.id, color) ? selectedCard.name : "";
+  const disabled = !color || candidates.length === 0;
+  const placeholder = !color ? "先にパートナーの色を選択" : candidates.length ? "カード名で検索・選択" : "この色の候補は準備中";
+  return `
+    <label>事件カード
+      <input type="search" name="${inputName}" list="${listId}" data-case-card-input="${scope}" value="${escapeHtml(selectedName)}" placeholder="${placeholder}" ${disabled ? "disabled" : ""} autocomplete="off">
+      <datalist id="${listId}" data-case-card-list="${scope}">${caseCardOptions(candidates)}</datalist>
+    </label>
+  `;
+}
+
+function caseCardOptions(cards) {
+  return cards.map((card) => `<option value="${escapeHtml(card.name)}">${escapeHtml(caseCardColorLabel(card))}</option>`).join("");
+}
+
+function updateCaseCardPicker(scope, partnerColor) {
+  const input = dialogFields.querySelector(`[data-case-card-input="${scope}"]`);
+  const list = dialogFields.querySelector(`[data-case-card-list="${scope}"]`);
+  if (!input || !list) return;
+  const color = normalizePartnerColor(partnerColor);
+  const candidates = caseCardsForPartnerColor(color);
+  const selectedCard = findCaseCardByName(input.value);
+  if (selectedCard && !isCaseCardAvailableForPartnerColor(selectedCard.id, color)) input.value = "";
+  input.disabled = !color || candidates.length === 0;
+  input.placeholder = !color ? "先にパートナーの色を選択" : candidates.length ? "カード名で検索・選択" : "この色の候補は準備中";
+  list.innerHTML = caseCardOptions(candidates);
+  input.setCustomValidity("");
+}
+
+function selectedCaseCardId(inputName, partnerColor) {
+  const input = dialogFields.querySelector(`input[name="${inputName}"]`);
+  const name = input?.value.trim() || "";
+  if (!name) return "";
+  const card = findCaseCardByName(name);
+  if (card && isCaseCardAvailableForPartnerColor(card.id, partnerColor)) return card.id;
+  input.setCustomValidity("候補から事件カードを選択してください");
+  input.reportValidity();
+  input.setCustomValidity("");
+  return null;
 }
 
 function passLabel(value) {
@@ -2520,6 +2661,14 @@ function routeActionMarkup() {
         <strong>デッキ設定</strong>
         <label>デッキ名<input name="deckName" value="${escapeHtml(deck.name)}"></label>
         <label>現行バージョン<input name="deckVersion" value="${escapeHtml(deck.version || "v1")}" placeholder="例: v2 / 新弾後"></label>
+        ${partnerColorChoices("deckPartnerColor", deck.partnerColor || "", "deck-settings")}
+        ${caseCardPicker({
+          inputName: "deckCaseCardName",
+          listId: "deckSettingsCaseCardSuggestions",
+          selectedCaseCardId: deck.caseCardId || "",
+          partnerColor: deck.partnerColor || "",
+          scope: "deck-settings"
+        })}
         <button class="primary-button inline-action" type="button" data-update-deck="${deck.id}">デッキ設定を更新</button>
         <button class="primary-button inline-action ghost-action" type="button" data-toggle-deck-archive="${deck.id}">${deck.archived ? "使用中に戻す" : "アーカイブする"}</button>
       </div>
