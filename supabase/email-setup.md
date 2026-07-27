@@ -22,7 +22,7 @@ Supabase Dashboardの `Authentication > Email Templates` で設定します。
 
 ## Custom SMTP
 
-友人へ公開する場合、Supabase標準メールは試用向けの制限があるためCustom SMTPを設定します。Dashboardの `Project Settings > Authentication > SMTP Settings` で有効化し、利用するメール配信サービスから次の値を入力します。
+友人へ公開する場合、Supabase標準メールは1プロジェクト全体で現在2通/時のため、Custom SMTPを設定します。アプリ側のコード変更は不要です。Dashboardの `Authentication > SMTP Settings` で有効化し、利用するメール配信サービスから次の値を入力します。
 
 - Sender name: `CONAN CARD Tracker`
 - Sender email: 配信サービスで認証済みの送信元アドレス
@@ -31,4 +31,6 @@ Supabase Dashboardの `Authentication > Email Templates` で設定します。
 - Username
 - Password
 
-SMTPパスワード、Supabase Secret key、service_role keyはリポジトリやブラウザコードへ保存しません。設定後は自分のアドレスで新規登録と再ログインを各1回試し、迷惑メール判定とスマホの遷移先を確認します。
+SMTPパスワード、Supabase Secret key、service_role keyはリポジトリやブラウザコードへ保存しません。設定後は `Authentication > Rate Limits` で送信上限を確認し、自分のアドレスで新規登録と再ログインを各1回試します。件名・迷惑メール判定・スマホの遷移先まで確認してください。
+
+設定にはSMTPサービス側で発行したHost、Port、Username、Passwordと、認証済みの送信元メールアドレスが必要です。これらが未発行の場合は、先にResend、Brevo、PostmarkなどのSMTP対応サービスでアカウントと送信元を準備します。

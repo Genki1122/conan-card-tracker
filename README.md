@@ -22,7 +22,7 @@ python3 -m http.server 4174
 
 ## データ保存
 
-未ログイン時のデータはブラウザの `localStorage` に保存されます。Supabaseを設定してメールログインすると、PCとスマホで同じクラウドデータを参照できます。
+未ログイン時のデータはブラウザの `localStorage` に保存されます。ログイン後のローカルデータはユーザーIDごとに分離され、同じ端末で別の利用者へ切り替えても記録は混ざりません。Supabaseを設定してメールログインすると、PCとスマホで同じクラウドデータを参照できます。
 
 ## Supabase同期
 
@@ -36,6 +36,8 @@ python3 -m http.server 4174
 `0harry0wilder0@gmail.com` で登録した利用者には `superadmin` が付与され、3点メニューから管理者画面を開けます。管理画面はRLSで保護され、一般利用者からは表示・参照できません。
 
 管理者は利用者一覧から対象者を選び、その利用者のデッキ・分析・プレイヤー・大会画面を閲覧専用で確認できます。既に初回の `schema.sql` を実行済みの場合は、追加で `supabase/admin-preview-migration.sql` を実行します。
+
+環境は全利用者共通のマスターから選択します。一般利用者は自由入力できず、superadminだけが追加・統合・名称変更・未使用環境の削除を行えます。既存プロジェクトでは追加で `supabase/environment-catalog-migration.sql` を実行してください。既存セッションにある環境名は自動でマスターへ登録されます。
 
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。
 
@@ -52,4 +54,4 @@ python3 -m http.server 4174
 
 日本語メール本文とCustom SMTPの設定項目は `supabase/email-setup.md` にまとめています。SMTPパスワードはGitHubへ保存せず、Supabase Dashboardへ直接入力してください。
 
-Publishable keyはRLSを有効にしたブラウザアプリで公開するためのキーです。Secret keyと`service_role` keyは使用しません。新規利用者向けの空データ開始と利用案内は、一般共有前の対応項目です。
+Publishable keyはRLSを有効にしたブラウザアプリで公開するためのキーです。Secret keyと`service_role` keyは使用しません。

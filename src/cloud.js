@@ -103,6 +103,61 @@ export async function saveAccountSetup({ username, termsVersion }) {
   return loadAccountContext();
 }
 
+export async function updateProfileUsername(username) {
+  const supabase = await getClient();
+  const userId = requireUserId();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ username, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+  if (error) throw error;
+  return username;
+}
+
+export async function loadEnvironmentCatalog() {
+  const supabase = await getClient();
+  const { data, error } = await supabase
+    .from("environment_catalog")
+    .select("id, name, sort_order")
+    .eq("active", true)
+    .order("sort_order")
+    .order("created_at");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function loadAdminEnvironmentCatalog() {
+  const supabase = await getClient();
+  requireUserId();
+  const { data, error } = await supabase.rpc("get_admin_environment_catalog");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function addEnvironmentCatalogItem(name) {
+  const supabase = await getClient();
+  requireUserId();
+  const { error } = await supabase.rpc("admin_add_environment", { environment_name: name });
+  if (error) throw error;
+}
+
+export async function renameEnvironmentCatalogItem(from, to) {
+  const supabase = await getClient();
+  requireUserId();
+  const { error } = await supabase.rpc("admin_rename_environment", {
+    current_name: from,
+    next_name: to
+  });
+  if (error) throw error;
+}
+
+export async function deleteEnvironmentCatalogItem(name) {
+  const supabase = await getClient();
+  requireUserId();
+  const { error } = await supabase.rpc("admin_delete_environment", { environment_name: name });
+  if (error) throw error;
+}
+
 export async function loadAdminData() {
   const supabase = await getClient();
   requireUserId();

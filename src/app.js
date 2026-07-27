@@ -27,25 +27,48 @@ import { buildAdminOverview, buildAiTrainingDataset } from "./admin-analytics.js
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
 import { authEmailErrorMessage } from "./auth-feedback.js";
 import {
+  activateAnonymousStorage,
+  activateUserStorage
+} from "./account-storage.js";
+import {
+  mergeStoreName,
+  renameEnvironmentInState,
+  updateSessionDeck
+} from "./data-operations.js";
+import {
+  addEnvironmentCatalogItem,
   cloudSnapshot,
+  deleteEnvironmentCatalogItem,
   getCloudConfig,
   initializeCloud,
   isCloudConfigured,
   loadAccountContext,
   loadAdminData,
+  loadAdminEnvironmentCatalog,
   loadAdminUserState,
   loadCloudState,
+  loadEnvironmentCatalog,
+  renameEnvironmentCatalogItem,
   saveAccountSetup,
   saveCloudConfig,
   saveCloudState,
   signInWithEmail,
-  signOutCloud
+  signOutCloud,
+  updateProfileUsername
 } from "./cloud.js";
 
-const storageKey = "conan-card-tracker-v2";
+const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
-const syncMetaStorageKey = "conan-card-tracker-sync-meta-v1";
+const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
+const initialStorageScope = activateAnonymousStorage({
+  stateBaseKey: storageBaseKey,
+  syncBaseKey: syncMetaBaseKey
+});
+let storageKey = initialStorageScope.stateKey;
+let syncMetaStorageKey = initialStorageScope.syncKey;
+let activeStorageUserId = "";
+let storageEpoch = 0;
 
 const view = document.querySelector("#appView");
 const phoneShell = document.querySelector(".phone-shell");
@@ -90,6 +113,10 @@ let accountContext = { schemaReady: false, username: "", termsAccepted: false, t
 let adminState = { loading: false, error: "", data: null, raw: null };
 let adminPreview = null;
 let registrationFeedback = null;
+let environmentCatalog = [];
+let environmentCatalogReady = false;
+let environmentCatalogError = "";
+let environmentCatalogMessage = "";
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
@@ -114,6 +141,15 @@ function loadState() {
     // Ignore malformed local data and fall back to a clean state.
   }
 
+  if (activeStorageUserId) return normalizeState(createInitialState());
+
+  try {
+    const legacyState = JSON.parse(localStorage.getItem(storageBaseKey));
+    if (legacyState) return normalizeState(removeLegacyMockState(legacyState));
+  } catch {
+    // Ignore old unscoped state that cannot be migrated.
+  }
+
   try {
     const legacy = JSON.parse(localStorage.getItem(legacyStorageKey)) || [];
     if (legacy.length > 0) return normalizeState(removeLegacyMockState(migrateLegacyMatches(legacy)));
@@ -122,6 +158,60 @@ function loadState() {
   }
 
   return normalizeState(createInitialState());
+}
+
+function activateUserLocalState(userId) {
+  if (!userId || activeStorageUserId === userId) return;
+  window.clearTimeout(cloudSaveTimer);
+  const scope = activateUserStorage(localStorage, {
+    stateBaseKey: storageBaseKey,
+    syncBaseKey: syncMetaBaseKey,
+    userId
+  });
+  storageKey = scope.stateKey;
+  syncMetaStorageKey = scope.syncKey;
+  activeStorageUserId = userId;
+  storageEpoch += 1;
+  state = loadState();
+
+  if (!localStorage.getItem(storageKey)) {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(legacyStorageKey)) || [];
+      if (legacy.length) {
+        state = normalizeState(removeLegacyMockState(migrateLegacyMatches(legacy)));
+        localStorage.setItem(storageKey, JSON.stringify(state));
+        localStorage.removeItem(legacyStorageKey);
+      }
+    } catch {
+      // Ignore legacy data that cannot be migrated.
+    }
+  }
+
+  syncMeta = loadSyncMeta();
+  cloudUpdatedAt = syncMeta.updatedAt || null;
+  localDirty = Boolean(syncMeta.dirty);
+  cloudConflict = false;
+  pendingRemoteState = null;
+  route = validRouteAfterSync(route);
+}
+
+function activateAnonymousLocalState() {
+  window.clearTimeout(cloudSaveTimer);
+  const scope = activateAnonymousStorage({
+    stateBaseKey: storageBaseKey,
+    syncBaseKey: syncMetaBaseKey
+  });
+  storageKey = scope.stateKey;
+  syncMetaStorageKey = scope.syncKey;
+  activeStorageUserId = "";
+  storageEpoch += 1;
+  state = loadState();
+  syncMeta = loadSyncMeta();
+  cloudUpdatedAt = syncMeta.updatedAt || null;
+  localDirty = Boolean(syncMeta.dirty);
+  cloudConflict = false;
+  pendingRemoteState = null;
+  route = { name: "decks" };
 }
 
 function loadSyncMeta() {
@@ -248,6 +338,10 @@ function uniqueValues(values) {
   return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
+function uniqueById(items) {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
+}
+
 function normalizePlayerName(value) {
   const name = String(value || "").trim();
   return !name || name === "未登録" ? "不明" : name;
@@ -282,10 +376,12 @@ async function flushCloudSave() {
 
   cloudSaveInFlight = true;
   cloudSavePending = false;
+  const requestEpoch = storageEpoch;
   const snapshot = JSON.parse(JSON.stringify(state));
   renderSyncStatus();
   try {
     const updatedAt = await saveCloudState(snapshot, { expectedUpdatedAt: cloudUpdatedAt });
+    if (requestEpoch !== storageEpoch) return;
     cloudUpdatedAt = updatedAt;
     if (statesEqual(snapshot, state)) {
       markCloudSynced(updatedAt);
@@ -299,6 +395,7 @@ async function flushCloudSave() {
     cloudMessage = localDirty ? "続きの変更をクラウド保存待ち" : "クラウド保存済み";
     rerenderOpenMenu();
   } catch (error) {
+    if (requestEpoch !== storageEpoch) return;
     cloudConflict = error.code === "CLOUD_CONFLICT";
     cloudMessage = `クラウド保存失敗: ${error.message}`;
     rerenderOpenMenu();
@@ -347,7 +444,10 @@ function updateSuggestions() {
   suggestionLists.opponentDecks.innerHTML = optionList(uniqueValues(state.matches.map((match) => match.opponentDeck)));
   suggestionLists.players.innerHTML = optionList(uniqueValues(state.matches.map((match) => match.opponentPlayer).filter(isKnownPlayerName)));
   suggestionLists.sessionNames.innerHTML = optionList(uniqueValues(state.sessions.map((session) => session.name)));
-  suggestionLists.environments.innerHTML = optionList(uniqueValues([...(state.environments || []), ...state.sessions.map((session) => session.environment)]));
+  suggestionLists.environments.innerHTML = optionList(uniqueValues([
+    ...catalogEnvironmentOptions(),
+    ...state.sessions.map((session) => session.environment)
+  ]));
 }
 
 function optionList(values) {
@@ -1109,8 +1209,11 @@ function openDialog(mode, targetId = null) {
     dialogTitle.textContent = editingSession ? "セッション編集" : "セッション登録";
     dialogSubmit.textContent = editingSession ? "更新" : "保存";
     const activeDecks = filterDecksByArchived(state.decks);
+    const editableDecks = editingSession
+      ? uniqueById([...activeDecks, getDeck(editingSession.deckId)].filter(Boolean))
+      : activeDecks;
     const deckId = route.deckId || activeDecks[0]?.id || "";
-    const fixedDeck = editingSession ? getDeck(editingSession.deckId) : route.name === "deckDetail" ? getDeck(route.deckId) : null;
+    const fixedDeck = !editingSession && route.name === "deckDetail" ? getDeck(route.deckId) : null;
     dialogFields.innerHTML = `
       ${fixedDeck ? `
         <div class="locked-field">
@@ -1120,10 +1223,11 @@ function openDialog(mode, targetId = null) {
           <input type="hidden" name="deckId" value="${fixedDeck.id}">
         </div>
       ` : `
-        <label>使用デッキ<select name="deckId" required>${activeDecks.map((deck) => `<option value="${deck.id}" ${deck.id === deckId ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
+        <label>使用デッキ<select name="deckId" required>${editableDecks.map((deck) => `<option value="${deck.id}" ${deck.id === (editingSession?.deckId || deckId) ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
       `}
+      ${editingSession ? `<label>使用時のバージョン<input name="deckVersion" required value="${escapeHtml(editingSession.deckVersion || getDeck(editingSession.deckId)?.version || "v1")}" placeholder="例: v2 / 新弾後"></label>` : ""}
       <label>大会名/店舗名<input name="name" list="sessionNameSuggestions" required placeholder="例: 秋葉原チェルモ" value="${escapeHtml(editingSession?.name || "")}"></label>
-      <label>環境<input name="environment" list="environmentSuggestions" required placeholder="例: 第3弾環境" value="${escapeHtml(editingSession?.environment || preferredEnvironment())}"></label>
+      ${sessionEnvironmentField(editingSession)}
       <div class="inline-fields">
         <label>日付<input type="date" name="date" required value="${editingSession?.date || new Date().toISOString().slice(0, 10)}"></label>
         <label>形式<select name="format">${optionTags([["BO1", "BO1"], ["BO3", "BO3"]], editingSession?.format || "BO1")}</select></label>
@@ -1212,11 +1316,11 @@ entryForm.addEventListener("submit", (event) => {
     const session = {
       id: editingSessionId || crypto.randomUUID(),
       deckId: data.get("deckId"),
-      deckVersion: currentSession?.deckVersion || selectedDeck?.version || "v1",
+      deckVersion: data.get("deckVersion")?.trim() || selectedDeck?.version || "v1",
       name: data.get("name").trim(),
       date: data.get("date"),
       format: data.get("format"),
-      environment: data.get("environment").trim(),
+      environment: data.get("environment"),
       placement: data.get("placement") || "",
       placementNote: data.get("placementNote").trim(),
       randomPrizeWon: canWinRandomPrize(data.get("placement")) && data.get("randomPrizeWon") === "on",
@@ -1224,8 +1328,12 @@ entryForm.addEventListener("submit", (event) => {
       randomPrizeMethodNote: data.get("randomPrizeMethodNote").trim(),
       staffRpsHands: randomPrizeMethod === "rps" ? [data.get("staffRps1"), data.get("staffRps2"), data.get("staffRps3")] : ["", "", ""]
     };
-    addEnvironment(session.environment);
     if (editingSessionId) {
+      state = updateSessionDeck(state, {
+        sessionId: editingSessionId,
+        deckId: session.deckId,
+        deckVersion: session.deckVersion
+      });
       state.sessions = state.sessions.map((current) => (current.id === editingSessionId ? session : current));
     } else {
       state.sessions.push(session);
@@ -1499,6 +1607,32 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-update-profile-username]")) {
+    const button = event.target.closest("[data-update-profile-username]");
+    const input = dialogFields.querySelector("input[name='profileUsername']");
+    const username = normalizeUsername(input?.value);
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      input.setCustomValidity(usernameError);
+      input.reportValidity();
+      input.setCustomValidity("");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "変更中...";
+    updateProfileUsername(username)
+      .then(() => {
+        accountContext = { ...accountContext, username };
+        cloudMessage = `ユーザー名を「${username}」へ変更しました`;
+        openDialog("cloudSettings");
+      })
+      .catch((error) => {
+        cloudMessage = `ユーザー名を変更できませんでした: ${error.message}`;
+        openDialog("cloudSettings");
+      });
+    return;
+  }
+
   if (event.target.closest("[data-cloud-download]")) {
     pullCloudState();
     return;
@@ -1529,13 +1663,11 @@ dialogFields.addEventListener("click", (event) => {
     signOutCloud()
       .then((nextStatus) => {
         cloudStatus = nextStatus;
-        cloudUpdatedAt = null;
-        saveSyncMeta();
-        cloudConflict = false;
-        pendingRemoteState = null;
+        activateAnonymousLocalState();
         accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
         adminState = { loading: false, error: "", data: null, raw: null };
         cloudMessage = "ログアウトしました";
+        render();
         openDialog("cloudSettings");
       })
       .catch((error) => {
@@ -1609,11 +1741,67 @@ dialogFields.addEventListener("click", (event) => {
   if (event.target.closest("[data-add-environment]")) {
     const input = dialogFields.querySelector("input[name='newEnvironment']");
     const value = input.value.trim();
-    if (!value) return;
-    addEnvironment(value);
-    saveState();
-    updateSuggestions();
-    openDialog("dataSettings");
+    if (!value || accountContext.role !== "superadmin") return;
+    const button = event.target.closest("[data-add-environment]");
+    button.disabled = true;
+    addEnvironmentCatalogItem(value)
+      .then(async () => {
+        environmentCatalogMessage = `「${value}」を追加しました`;
+        await refreshEnvironmentCatalog(true);
+        updateSuggestions();
+        openDialog("dataSettings");
+      })
+      .catch((error) => {
+        environmentCatalogMessage = environmentActionError(error);
+        openDialog("dataSettings");
+      });
+    return;
+  }
+
+  const renameEnvironmentButton = event.target.closest("[data-rename-environment]");
+  if (renameEnvironmentButton) {
+    if (accountContext.role !== "superadmin") return;
+    const id = renameEnvironmentButton.dataset.renameEnvironment;
+    const from = renameEnvironmentButton.dataset.currentEnvironment;
+    const to = dialogFields.querySelector(`input[name='environmentName-${id}']`)?.value.trim();
+    if (!to || from === to) return;
+    const usage = Number(environmentCatalog.find((item) => String(item.id) === id)?.usage_count || 0);
+    const confirmed = confirm(`「${from}」を「${to}」へ変更しますか？\n全利用者の${usage}セッションに反映されます。`);
+    if (!confirmed) return;
+    renameEnvironmentButton.disabled = true;
+    renameEnvironmentCatalogItem(from, to)
+      .then(async () => {
+        state = renameEnvironmentInState(state, from, to);
+        localStorage.setItem(storageKey, JSON.stringify(state));
+        await pushCloudState({ force: true, silent: true });
+        environmentCatalogMessage = `「${from}」を「${to}」へ変更しました`;
+        await refreshEnvironmentCatalog(true);
+        updateSuggestions();
+        openDialog("dataSettings");
+      })
+      .catch((error) => {
+        environmentCatalogMessage = environmentActionError(error);
+        openDialog("dataSettings");
+      });
+    return;
+  }
+
+  const deleteEnvironmentButton = event.target.closest("[data-delete-environment]");
+  if (deleteEnvironmentButton) {
+    if (accountContext.role !== "superadmin" || deleteEnvironmentButton.disabled) return;
+    const name = deleteEnvironmentButton.dataset.deleteEnvironment;
+    if (!confirm(`未使用の環境「${name}」を削除しますか？`)) return;
+    deleteEnvironmentButton.disabled = true;
+    deleteEnvironmentCatalogItem(name)
+      .then(async () => {
+        environmentCatalogMessage = `「${name}」を削除しました`;
+        await refreshEnvironmentCatalog(true);
+        openDialog("dataSettings");
+      })
+      .catch((error) => {
+        environmentCatalogMessage = environmentActionError(error);
+        openDialog("dataSettings");
+      });
     return;
   }
 
@@ -1647,6 +1835,25 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-merge-stores]")) {
+    const from = dialogFields.querySelector("select[name='storeMergeFrom']").value;
+    const to = dialogFields.querySelector("input[name='storeMergeTo']").value.trim();
+    if (!from || !to || from === to) return;
+    const affected = state.sessions.filter((session) => session.name === from).length;
+    const confirmed = confirm(`「${from}」を「${to}」へ統合しますか？\n${affected}セッションの店舗名が変更されます。`);
+    if (!confirmed) return;
+    const result = mergeStoreName(state, from, to);
+    state = result.state;
+    saveState();
+    if (route.name === "storeDetail" && route.storeName === from) {
+      route = { ...route, storeName: to };
+      render();
+    }
+    cloudMessage = `${result.affected}セッションの店舗名を「${to}」へ統合しました`;
+    openDialog("dataSettings");
+    return;
+  }
+
   if (event.target.closest("[data-copy-export]")) {
     const payload = JSON.stringify(state, null, 2);
     navigator.clipboard?.writeText(payload);
@@ -1658,6 +1865,7 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (!event.target.closest("[data-delete-editing-match]") || !editingMatchId) return;
+  if (!confirm("この試合記録を削除しますか？")) return;
   state.matches = state.matches.filter((match) => match.id !== editingMatchId);
   saveState();
   dialog.close();
@@ -1754,12 +1962,51 @@ function environmentOptions() {
   return uniqueValues([...(state.environments || []), ...state.sessions.map((session) => session.environment)]);
 }
 
-function preferredEnvironment() {
-  return environmentOptions()[0] || "未設定";
+function catalogEnvironmentOptions() {
+  return uniqueValues(environmentCatalog.filter((item) => item.active !== false).map((item) => item.name));
 }
 
-function addEnvironment(environment) {
-  state.environments = uniqueValues([...(state.environments || []), environment]);
+function sessionEnvironmentField(editingSession) {
+  const selected = editingSession?.environment || preferredEnvironment();
+  const masterOptions = environmentCatalogReady ? catalogEnvironmentOptions() : environmentOptions();
+  const options = uniqueValues([
+    ...masterOptions.filter((environment) => environment !== "未設定"),
+    ...(editingSession?.environment ? [editingSession.environment] : [])
+  ]);
+  return `
+    <label>環境<select name="environment" required>
+      ${options.length ? "" : `<option value="" selected disabled>管理者による環境登録が必要です</option>`}
+      ${options.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === selected ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}
+    </select></label>
+    ${environmentCatalogReady ? "" : `<p class="form-note">環境マスターを読み込めないため、一時的に過去に使用した環境だけ選べます。</p>`}
+  `;
+}
+
+function preferredEnvironment() {
+  return catalogEnvironmentOptions()[0] || "";
+}
+
+async function refreshEnvironmentCatalog(admin = accountContext.role === "superadmin") {
+  try {
+    environmentCatalog = admin
+      ? await loadAdminEnvironmentCatalog()
+      : await loadEnvironmentCatalog();
+    environmentCatalogReady = true;
+    environmentCatalogError = "";
+  } catch (error) {
+    environmentCatalogReady = false;
+    environmentCatalogError = String(error?.message || "");
+  }
+}
+
+function environmentActionError(error) {
+  const message = String(error?.message || "");
+  if (message.includes("already exists") || message.includes("duplicate key")) {
+    return "同じ名前の環境がすでに登録されています。";
+  }
+  if (message.includes("in use")) return "使用中の環境は削除できません。先に名称変更で別の環境へ統合してください。";
+  if (message.includes("Administrator")) return "環境を変更できるのは管理者だけです。";
+  return "環境マスターを更新できませんでした。通信状況を確認してください。";
 }
 
 function stageRemoteReconciliation(remote) {
@@ -1809,7 +2056,9 @@ async function refreshCloudSession() {
       cloudStatus = nextStatus;
       rerenderOpenMenu();
     });
+    await refreshEnvironmentCatalog(false);
     if (cloudStatus.signedIn) {
+      activateUserLocalState(cloudStatus.userId);
       registrationFeedback = null;
       try {
         accountContext = await loadAccountContext();
@@ -1819,6 +2068,7 @@ async function refreshCloudSession() {
           cloudMessage = `アカウント情報の読込失敗: ${error.message}`;
         }
       }
+      if (accountContext.role === "superadmin") await refreshEnvironmentCatalog(true);
       await pullCloudState({ uploadWhenEmpty: true, silent: true });
       if (accountContext.schemaReady && !accountContext.termsAccepted) {
         cloudMessage = "ユーザー名と規約同意を登録してください";
@@ -1881,12 +2131,14 @@ function closeAdminUserPreview() {
 
 async function pullCloudState(options = {}) {
   const { uploadWhenEmpty = false, silent = false } = options;
+  const requestEpoch = storageEpoch;
   try {
     if (!silent) {
       cloudMessage = "クラウド読込中";
       rerenderOpenMenu();
     }
     const remote = await loadCloudState();
+    if (requestEpoch !== storageEpoch) return;
     if (remote?.data) {
       const cleanedRemote = removeLegacyMockState(remote.data);
       if (!statesEqual(remote.data, cleanedRemote)) {
@@ -1928,6 +2180,7 @@ async function pullCloudState(options = {}) {
 
 async function pushCloudState(options = {}) {
   const { silent = false, force = false } = options;
+  const requestEpoch = storageEpoch;
   const snapshot = JSON.parse(JSON.stringify(state));
   try {
     if (!silent) {
@@ -1938,6 +2191,7 @@ async function pushCloudState(options = {}) {
       expectedUpdatedAt: cloudUpdatedAt,
       force
     });
+    if (requestEpoch !== storageEpoch) return;
     cloudUpdatedAt = updatedAt;
     cloudConflict = false;
     pendingRemoteState = null;
@@ -1951,6 +2205,7 @@ async function pushCloudState(options = {}) {
     cloudMessage = localDirty ? "続きの変更をクラウド保存待ち" : `クラウド保存済み ${formatSyncTime(updatedAt)}`;
     rerenderOpenMenu();
   } catch (error) {
+    if (requestEpoch !== storageEpoch) return;
     cloudConflict = error.code === "CLOUD_CONFLICT";
     cloudMessage = `クラウド保存失敗: ${error.message}`;
     rerenderOpenMenu();
@@ -2089,6 +2344,13 @@ function cloudMenuMarkup() {
           <label class="consent-field"><input name="accountTermsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
           <button class="primary-button inline-action" type="button" data-save-account-setup>登録を完了する</button>
         ` : ""}
+        ${accountContext.schemaReady && accountContext.termsAccepted ? `
+          <details class="terms-disclosure profile-settings">
+            <summary>ユーザー名を変更</summary>
+            <label>ユーザー名<input name="profileUsername" autocomplete="nickname" maxlength="20" value="${escapeHtml(accountContext.username)}"></label>
+            <button class="primary-button inline-action" type="button" data-update-profile-username>ユーザー名を変更</button>
+          </details>
+        ` : ""}
         <div class="cloud-actions">
           ${pendingRemoteState ? `
             <div class="sync-conflict">
@@ -2176,13 +2438,9 @@ function menuRowsMarkup() {
 }
 
 function dataSettingsMarkup() {
+  const stores = uniqueValues(state.sessions.map((session) => session.name));
   return `
-    <div class="environment-manager">
-      <strong>環境管理</strong>
-      <div class="environment-chip-list">${environmentOptions().map((environment) => `<span>${escapeHtml(environment)}</span>`).join("") || "<span>未登録</span>"}</div>
-      <label>環境を追加<input name="newEnvironment" list="environmentSuggestions" placeholder="例: 第4弾環境"></label>
-      <button class="primary-button inline-action" type="button" data-add-environment>環境を追加</button>
-    </div>
+    ${environmentMasterMarkup()}
     <details class="import-panel">
       <summary>相手デッキ名を統合</summary>
       <input type="hidden" name="mergeType" value="opponentDeck">
@@ -2190,12 +2448,64 @@ function dataSettingsMarkup() {
       <label>統合先<input name="mergeTo" placeholder="今後使う正式名称"></label>
       <button class="primary-button inline-action" type="button" data-merge-names>名称を統合</button>
     </details>
+    <details class="import-panel">
+      <summary>店舗名を統合</summary>
+      <label>統合元<select name="storeMergeFrom"><option value="">選択</option>${stores.map((store) => `<option value="${escapeHtml(store)}">${escapeHtml(store)}</option>`).join("")}</select></label>
+      <label>統合先<input name="storeMergeTo" list="sessionNameSuggestions" placeholder="正式な店舗名"></label>
+      <button class="primary-button inline-action" type="button" data-merge-stores>店舗名を統合</button>
+    </details>
     <button class="primary-button inline-action ghost-action" type="button" data-copy-export>JSONをコピー</button>
     <details class="import-panel">
       <summary>JSONから復元</summary>
       <label>JSONデータ<textarea name="importJson" rows="5" placeholder="PCでコピーしたJSONを貼り付け"></textarea></label>
       <button class="primary-button inline-action" type="button" data-import-json>インポート</button>
     </details>
+  `;
+}
+
+function environmentMasterMarkup() {
+  const names = catalogEnvironmentOptions();
+  if (!environmentCatalogReady) {
+    const migrationMissing = environmentCatalogError.includes("environment_catalog")
+      || environmentCatalogError.includes("get_admin_environment_catalog");
+    return `
+      <div class="environment-manager account-attention">
+        <strong>環境マスターを読み込めません</strong>
+        <span>${migrationMissing ? "管理者によるSupabaseの環境マスター設定が必要です。" : "通信状況を確認して、もう一度開いてください。"}</span>
+      </div>
+    `;
+  }
+
+  if (accountContext.role !== "superadmin") {
+    return `
+      <div class="environment-manager">
+        <strong>選択できる環境</strong>
+        <div class="environment-chip-list">${names.map((environment) => `<span>${escapeHtml(environment)}</span>`).join("") || "<span>未登録</span>"}</div>
+        <span>環境は管理者が共通管理しています。</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="environment-manager">
+      <strong>環境マスター</strong>
+      <span>名称変更は全利用者の過去セッションにも反映されます。</span>
+      ${environmentCatalogMessage ? `<p class="cloud-message" role="status">${escapeHtml(environmentCatalogMessage)}</p>` : ""}
+      <div class="environment-admin-list">
+        ${environmentCatalog.map((environment) => `
+          <div class="environment-admin-row">
+            <label>
+              <span>${Number(environment.usage_count || 0)}セッション</span>
+              <input name="environmentName-${environment.id}" value="${escapeHtml(environment.name)}" list="environmentSuggestions">
+            </label>
+            <button type="button" data-rename-environment="${environment.id}" data-current-environment="${escapeHtml(environment.name)}">変更</button>
+            <button class="danger-button" type="button" data-delete-environment="${escapeHtml(environment.name)}" ${Number(environment.usage_count || 0) ? "disabled" : ""}>削除</button>
+          </div>
+        `).join("") || `<span>環境がまだ登録されていません。</span>`}
+      </div>
+      <label>環境を追加<input name="newEnvironment" maxlength="40" placeholder="例: 第10弾環境"></label>
+      <button class="primary-button inline-action" type="button" data-add-environment>環境を追加</button>
+    </div>
   `;
 }
 
