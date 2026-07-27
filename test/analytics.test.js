@@ -6,6 +6,7 @@ import {
   filterMatchesByMonth,
   filterMatchesWithoutPasses,
   filterDecksByArchived,
+  formatPercentage,
   formatRecordDate,
   getDeckBreakdown,
   getOpponentBreakdown,
@@ -95,6 +96,14 @@ describe("pass exclusion analysis", () => {
       filterMatchesWithoutPasses(passMatches).map((match) => match.id),
       ["none", "legacy-none"]
     );
+  });
+});
+
+describe("analysis percentage formatting", () => {
+  it("always displays one decimal place", () => {
+    assert.equal(formatPercentage(50), "50.0%");
+    assert.equal(formatPercentage(66.7), "66.7%");
+    assert.equal(formatPercentage(undefined), "0.0%");
   });
 });
 

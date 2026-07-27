@@ -4,6 +4,7 @@ import {
   filterMatchesByEnvironment,
   filterMatchesByMonth,
   filterMatchesWithoutPasses,
+  formatPercentage,
   formatRecordDate,
   getCrossBreakdown,
   getPlayerOverviews,
@@ -806,9 +807,9 @@ function renderSummary() {
   const deck = getDeck(selectedDeckId);
   const versions = selectedDeckId ? versionsForDeck(selectedDeckId) : [];
   const selectedVersion = route.version && versions.includes(route.version) ? route.version : "";
-  const environments = selectedDeckId ? environmentsForDeck(selectedDeckId, selectedVersion) : [];
+  const environments = environmentsForDeck(selectedDeckId, selectedVersion);
   const selectedEnvironment = route.environment && environments.includes(route.environment) ? route.environment : "";
-  const stores = selectedDeckId ? storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion) : [];
+  const stores = storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion);
   const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
   const months = analysisMonths();
   const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
@@ -853,25 +854,25 @@ function renderSummary() {
     <section class="analysis-hero">
       <div>
         <span class="label">${escapeHtml(deck?.name || "全デッキ")} / ${selectedMonth ? formatMonth(selectedMonth) : "全期間"}</span>
-        <strong>${summary.winRate}%</strong>
+        <strong>${formatPercentage(summary.winRate)}</strong>
         <small>${summary.wins}勝 ${summary.losses}敗 ${summary.draws || 0}分 / ${summary.total}戦</small>
       </div>
       <div class="mini-metrics">
-        <span>先 ${summary.first.winRate}%</span>
-        <span>後 ${summary.second.winRate}%</span>
+        <span>先 ${formatPercentage(summary.first.winRate)}</span>
+        <span>後 ${formatPercentage(summary.second.winRate)}</span>
       </div>
     </section>
 
     <section class="breakdown-panel">
       <h2>内訳</h2>
       <div class="breakdown-grid">
-        ${breakdownCard("総合", recordCompact(summary), `${summary.winRate}%`)}
-        ${breakdownCard("先攻", turnRecordText(summary.first), `${summary.first.winRate}%`)}
-        ${breakdownCard("後攻", turnRecordText(summary.second), `${summary.second.winRate}%`)}
-        ${breakdownCard("自分パス無", turnRecordText(passRecord.myNoPass), `${passRecord.myNoPass.winRate}%`)}
-        ${breakdownCard("自分パス有", turnRecordText(passRecord.myAnyPass), `${passRecord.myAnyPass.winRate}%`)}
-        ${breakdownCard("相手パス無", turnRecordText(passRecord.opponentNoPass), `${passRecord.opponentNoPass.winRate}%`)}
-        ${breakdownCard("相手パス有", turnRecordText(passRecord.opponentAnyPass), `${passRecord.opponentAnyPass.winRate}%`)}
+        ${breakdownCard("総合", recordCompact(summary), formatPercentage(summary.winRate))}
+        ${breakdownCard("先攻", turnRecordText(summary.first), formatPercentage(summary.first.winRate))}
+        ${breakdownCard("後攻", turnRecordText(summary.second), formatPercentage(summary.second.winRate))}
+        ${breakdownCard("自分パス無", turnRecordText(passRecord.myNoPass), formatPercentage(passRecord.myNoPass.winRate))}
+        ${breakdownCard("自分パス有", turnRecordText(passRecord.myAnyPass), formatPercentage(passRecord.myAnyPass.winRate))}
+        ${breakdownCard("相手パス無", turnRecordText(passRecord.opponentNoPass), formatPercentage(passRecord.opponentNoPass.winRate))}
+        ${breakdownCard("相手パス有", turnRecordText(passRecord.opponentAnyPass), formatPercentage(passRecord.opponentAnyPass.winRate))}
       </div>
     </section>
 
@@ -905,7 +906,7 @@ function renderSummary() {
               <span>先 ${recordCompact(row.first)} / 後 ${recordCompact(row.second)}</span>
             </div>
             <div class="matchup-rate">
-              <b>${row.winRate}%</b>
+              <b>${formatPercentage(row.winRate)}</b>
               <div class="rps-track"><div class="progress-fill" style="width:${row.winRate}%"></div></div>
             </div>
           </summary>
@@ -1021,7 +1022,7 @@ function colorCaseBreakdownMarkup(matches, colorName) {
       ${rows.map((row) => `
         <div class="color-case-row">
           <span>${escapeHtml(row.name)}</span>
-          <b>${row.wins}-${row.losses}${row.draws ? `-${row.draws}` : ""} / ${row.winRate}%</b>
+          <b>${row.wins}-${row.losses}${row.draws ? `-${row.draws}` : ""} / ${formatPercentage(row.winRate)}</b>
         </div>
       `).join("") || `<p>事件カードの記録はありません</p>`}
     </div>
@@ -2424,7 +2425,7 @@ function recordCompact(record) {
 }
 
 function turnRecordText(record) {
-  return `${recordCompact(record)} / ${record.winRate}%`;
+  return `${recordCompact(record)} / ${formatPercentage(record.winRate)}`;
 }
 
 function sampleLabel(total) {

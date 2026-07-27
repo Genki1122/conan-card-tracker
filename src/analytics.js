@@ -83,6 +83,11 @@ export function filterMatchesWithoutPasses(matches = []) {
   return matches.filter((match) => !isPassRecorded(match.myPassed) && !isPassRecorded(match.opponentPassed));
 }
 
+export function formatPercentage(value) {
+  const numeric = Number(value);
+  return `${(Number.isFinite(numeric) ? numeric : 0).toFixed(1)}%`;
+}
+
 export function summarizeMatches(matches = []) {
   const total = tally(matches);
   const first = tally(matches, (match) => match.firstPlayer === "first");
