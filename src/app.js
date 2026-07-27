@@ -512,6 +512,7 @@ function enrichMatches(matches) {
       deckVersion: session?.deckVersion || "v1",
       store: session?.name || "未設定",
       date: session?.date || "",
+      opponentColor: match.opponentPartnerColor ? partnerColorLabel(match.opponentPartnerColor) : "",
       order: index
     };
   });
@@ -812,13 +813,17 @@ function renderSummary() {
   const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
   const months = analysisMonths();
   const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
-  const selectedPivot = ["opponentDeck", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
+  const selectedPivot = ["opponentDeck", "opponentColor", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
   const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
   const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion);
   const matches = filterMatchesByMonth(baseMatches, selectedMonth);
   const summary = summarizeMatches(matches);
   const passRecord = splitPassRecord(matches);
-  const breakdownMatches = selectedPivot === "opponentPlayer" ? matches.filter((match) => isKnownPlayerName(match.opponentPlayer)) : matches;
+  const breakdownMatches = selectedPivot === "opponentPlayer"
+    ? matches.filter((match) => isKnownPlayerName(match.opponentPlayer))
+    : selectedPivot === "opponentColor"
+      ? matches.filter((match) => match.opponentColor)
+      : matches;
   const rows = sortCrossRows(getCrossBreakdown(breakdownMatches, selectedPivot), selectedSort);
 
   view.innerHTML = `
@@ -875,6 +880,7 @@ function renderSummary() {
     <div class="deck-tabs filter-tabs" aria-label="集計軸">
       ${[
         ["opponentDeck", "相手デッキ"],
+        ["opponentColor", "相手色"],
         ["myDeck", "自分デッキ"],
         ["month", "月別"],
         ["deckVersion", "バージョン"],
@@ -890,7 +896,7 @@ function renderSummary() {
         <details class="matchup-row">
           <summary>
             <div>
-              <strong>${escapeHtml(row.name)}</strong>
+              <strong>${analysisRowName(row.name, selectedPivot)}</strong>
               <span>${row.wins}勝 ${row.losses}敗 ${row.draws}分 / ${row.total}戦 ${sampleLabel(row.total)}</span>
               <span>先 ${recordCompact(row.first)} / 後 ${recordCompact(row.second)}</span>
             </div>
@@ -992,6 +998,12 @@ function playerRowsMarkup(rows, query, hasContextFilter) {
       <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
     </button>
   `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : hasContextFilter ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`;
+}
+
+function analysisRowName(name, pivot) {
+  if (pivot !== "opponentColor") return escapeHtml(name);
+  const color = partnerColors.find((item) => item.label === name);
+  return `<span class="analysis-color-name"><i class="${color?.id || "unrecorded"}"></i>${escapeHtml(name)}</span>`;
 }
 
 function playerRpsMarkup(rps, compact = false) {

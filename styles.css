@@ -451,6 +451,31 @@ button {
   font-weight: 900;
 }
 
+.matchup-row .analysis-color-name {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.analysis-color-name i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 50%;
+}
+
+.analysis-color-name i.blue { background: #277ec7; }
+.analysis-color-name i.green { background: #24935d; }
+.analysis-color-name i.white { background: #f3f3f5; }
+.analysis-color-name i.red { background: #d84a5f; }
+.analysis-color-name i.yellow { background: #e4b93f; }
+.analysis-color-name i.black { background: #09090b; }
+
 .matchup-rate {
   display: grid;
   gap: 6px;

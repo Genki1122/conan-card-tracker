@@ -38,3 +38,32 @@ test("validates a selected case card against the selected partner color", () => 
   assert.equal(isCaseCardAvailableForPartnerColor(sharedCase.id, "blue"), true);
   assert.equal(isCaseCardAvailableForPartnerColor(sharedCase.id, "green"), true);
 });
+
+test("provides case cards for white, red, yellow, and black partners", () => {
+  const expectedByColor = {
+    white: ["怪盗キッドの瞬間移動魔術", "コナンvsキッド 赤面の人魚", "漆黒の特急"],
+    red: ["緋色の帰還", "赤女の悲劇", "愛しい愛しい⋯宿敵さん"],
+    yellow: ["囚われた刑事", "怪盗キッドと四名画", "裏切りの矛先"],
+    black: ["あばよ⋯名探偵!!", "ブラックインパクト!", "犯人たちの犯行"]
+  };
+
+  Object.entries(expectedByColor).forEach(([color, expectedNames]) => {
+    const names = caseCardsForPartnerColor(color).map((card) => card.name);
+    expectedNames.forEach((name) => assert.equal(names.includes(name), true, `${color}: ${name}`));
+  });
+});
+
+test("stores shared case cards once while exposing them to both partner colors", () => {
+  const sharedNames = [
+    "怪盗キッドの絡繰箱",
+    "怪盗キッドと四名画",
+    "裏切りの矛先",
+    "愛しい愛しい⋯宿敵さん"
+  ];
+
+  sharedNames.forEach((name) => {
+    const card = findCaseCardByName(name);
+    assert.ok(card, name);
+    assert.equal(new Set(card.colors).size, card.colors.length);
+  });
+});
