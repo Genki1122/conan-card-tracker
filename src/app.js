@@ -36,6 +36,7 @@ import {
 import {
   mergeStoreName,
   renameEnvironmentInState,
+  sessionVersionOptions,
   updateSessionDeck
 } from "./data-operations.js";
 import {
@@ -1280,6 +1281,9 @@ function openDialog(mode, targetId = null) {
       : activeDecks;
     const deckId = route.deckId || activeDecks[0]?.id || "";
     const fixedDeck = !editingSession && route.name === "deckDetail" ? getDeck(route.deckId) : null;
+    const selectedSessionDeckId = editingSession?.deckId || deckId;
+    const selectedSessionVersion = editingSession?.deckVersion || getDeck(selectedSessionDeckId)?.version || "v1";
+    const sessionVersions = sessionVersionOptions(state, selectedSessionDeckId, selectedSessionVersion);
     dialogFields.innerHTML = `
       ${fixedDeck ? `
         <div class="locked-field">
@@ -1289,9 +1293,9 @@ function openDialog(mode, targetId = null) {
           <input type="hidden" name="deckId" value="${fixedDeck.id}">
         </div>
       ` : `
-        <label>使用デッキ<select name="deckId" required>${editableDecks.map((deck) => `<option value="${deck.id}" ${deck.id === (editingSession?.deckId || deckId) ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
+        <label>使用デッキ<select name="deckId" data-session-deck-select required>${editableDecks.map((deck) => `<option value="${deck.id}" ${deck.id === selectedSessionDeckId ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
       `}
-      ${editingSession ? `<label>使用時のバージョン<input name="deckVersion" required value="${escapeHtml(editingSession.deckVersion || getDeck(editingSession.deckId)?.version || "v1")}" placeholder="例: v2 / 新弾後"></label>` : ""}
+      ${editingSession ? `<label>使用時のバージョン<select name="deckVersion" data-session-version-select required>${optionTags(sessionVersions.map((version) => [version, version]), selectedSessionVersion)}</select></label>` : ""}
       <label>大会名/店舗名<input name="name" list="sessionNameSuggestions" required placeholder="例: 秋葉原チェルモ" value="${escapeHtml(editingSession?.name || "")}"></label>
       ${sessionEnvironmentField(editingSession)}
       <div class="inline-fields">
@@ -1554,6 +1558,8 @@ view.addEventListener("compositionend", (event) => {
 });
 
 dialogFields.addEventListener("change", (event) => {
+  const sessionDeckSelect = event.target.closest("[data-session-deck-select]");
+  if (sessionDeckSelect) updateSessionVersionPicker(sessionDeckSelect.value);
   const partnerColorInput = event.target.closest("[data-partner-color-input]");
   if (partnerColorInput) {
     updateCaseCardPicker(partnerColorInput.dataset.partnerColorInput, partnerColorInput.value);
@@ -2082,7 +2088,7 @@ function partnerColorChoices(name, selected = "", scope = "") {
 
 function caseCardPicker({ inputName, listId, selectedCaseCardId = "", partnerColor = "", scope = "" }) {
   const color = normalizePartnerColor(partnerColor);
-  const candidates = caseCardsForPartnerColor(color);
+  const candidates = caseCardsForPartnerColor(color, caseCardUsageCounts(scope));
   const selectedCard = getCaseCard(selectedCaseCardId);
   const selectedName = selectedCard && isCaseCardAvailableForPartnerColor(selectedCard.id, color) ? selectedCard.name : "";
   const disabled = !color || candidates.length === 0;
@@ -2104,13 +2110,32 @@ function updateCaseCardPicker(scope, partnerColor) {
   const list = dialogFields.querySelector(`[data-case-card-list="${scope}"]`);
   if (!input || !list) return;
   const color = normalizePartnerColor(partnerColor);
-  const candidates = caseCardsForPartnerColor(color);
+  const candidates = caseCardsForPartnerColor(color, caseCardUsageCounts(scope));
   const selectedCard = findCaseCardByName(input.value);
   if (selectedCard && !isCaseCardAvailableForPartnerColor(selectedCard.id, color)) input.value = "";
   input.disabled = !color || candidates.length === 0;
   input.placeholder = !color ? "先にパートナーの色を選択" : candidates.length ? "カード名で検索・選択" : "この色の候補は準備中";
   list.innerHTML = caseCardOptions(candidates);
   input.setCustomValidity("");
+}
+
+function caseCardUsageCounts(scope) {
+  const caseCardIds = scope === "opponent"
+    ? state.matches.map((match) => match.opponentCaseCardId)
+    : state.sessions.map((session) => session.caseCardId);
+  return caseCardIds.reduce((counts, caseCardId) => {
+    if (!caseCardId) return counts;
+    counts[caseCardId] = (counts[caseCardId] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function updateSessionVersionPicker(deckId) {
+  const select = dialogFields.querySelector("[data-session-version-select]");
+  if (!select) return;
+  const deck = getDeck(deckId);
+  const versions = sessionVersionOptions(state, deckId);
+  select.innerHTML = optionTags(versions.map((version) => [version, version]), deck?.version || versions[0] || "v1");
 }
 
 function selectedCaseCardId(inputName, partnerColor) {

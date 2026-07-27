@@ -12,6 +12,18 @@ export function updateSessionDeck(state, { sessionId, deckId, deckVersion }) {
   };
 }
 
+export function sessionVersionOptions(state, deckId, selectedVersion = "") {
+  const deck = state.decks.find((item) => item.id === deckId);
+  const values = [
+    selectedVersion,
+    deck?.version,
+    ...state.sessions
+      .filter((session) => session.deckId === deckId)
+      .map((session) => session.deckVersion)
+  ];
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 export function mergeStoreName(state, from, to) {
   let affected = 0;
   const sessions = state.sessions.map((session) => {

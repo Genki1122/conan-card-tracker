@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  sessionVersionOptions,
   mergeStoreName,
   renameEnvironmentInState,
   updateSessionDeck
@@ -57,4 +58,18 @@ test("renaming an environment updates sessions and removes duplicate master entr
 
   assert.deepEqual(next.environments, ["第9弾環境"]);
   assert.equal(next.sessions.every((session) => session.environment === "第9弾環境"), true);
+});
+
+test("provides stable session version choices without duplicates", () => {
+  const state = {
+    ...baseState,
+    decks: [{ id: "deck-a", name: "鬼丸剣道", version: "v3" }],
+    sessions: [
+      { id: "session-1", deckId: "deck-a", deckVersion: "v1" },
+      { id: "session-2", deckId: "deck-a", deckVersion: "v2" },
+      { id: "session-3", deckId: "deck-a", deckVersion: "v2" }
+    ]
+  };
+
+  assert.deepEqual(sessionVersionOptions(state, "deck-a", "大会用"), ["大会用", "v3", "v1", "v2"]);
 });

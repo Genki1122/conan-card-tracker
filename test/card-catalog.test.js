@@ -67,3 +67,15 @@ test("stores shared case cards once while exposing them to both partner colors",
     assert.equal(new Set(card.colors).size, card.colors.length);
   });
 });
+
+test("ranks frequently selected case cards higher within the same color group", () => {
+  const cards = caseCardsForPartnerColor("blue", {
+    "pro-soccer-player-threat": 5,
+    "diplomat-murder": 20
+  });
+  const names = cards.map((card) => card.name);
+
+  assert.ok(names.indexOf("プロサッカー選手脅迫事件") < names.indexOf("平成のホームズ"));
+  assert.ok(names.indexOf("外交官殺人事件") < names.indexOf("どっちの推理ショー"));
+  assert.ok(names.indexOf("平成のホームズ") < names.indexOf("外交官殺人事件"));
+});

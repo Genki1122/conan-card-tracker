@@ -88,13 +88,17 @@ export function caseCardColorLabel(card) {
   return card.colors.map((color) => colorById.get(color)?.label || "").filter(Boolean).join("/");
 }
 
-export function caseCardsForPartnerColor(partnerColor) {
+export function caseCardsForPartnerColor(partnerColor, usageCounts = {}) {
   const normalizedColor = normalizePartnerColor(partnerColor);
   if (!normalizedColor) return [];
   return caseCards
     .filter((card) => card.colors.includes(normalizedColor))
     .map((card, index) => ({ card, index }))
-    .sort((left, right) => caseCardRank(left.card, normalizedColor) - caseCardRank(right.card, normalizedColor) || left.index - right.index)
+    .sort((left, right) => (
+      caseCardRank(left.card, normalizedColor) - caseCardRank(right.card, normalizedColor)
+      || caseCardUsage(usageCounts, right.card.id) - caseCardUsage(usageCounts, left.card.id)
+      || left.index - right.index
+    ))
     .map(({ card }) => card);
 }
 
@@ -116,4 +120,10 @@ function caseCardRank(card, partnerColor) {
   if (card.allColors) return 2;
   if (card.colors.length === 1 && card.colors[0] === partnerColor) return 0;
   return 1;
+}
+
+function caseCardUsage(usageCounts, caseCardId) {
+  const value = usageCounts instanceof Map ? usageCounts.get(caseCardId) : usageCounts?.[caseCardId];
+  const count = Number(value);
+  return Number.isFinite(count) ? count : 0;
 }
