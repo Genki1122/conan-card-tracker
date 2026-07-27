@@ -4,6 +4,7 @@ import {
   canWinRandomPrize,
   filterMatchesByEnvironment,
   filterMatchesByMonth,
+  filterMatchesWithoutPasses,
   filterDecksByArchived,
   formatRecordDate,
   getDeckBreakdown,
@@ -77,6 +78,23 @@ describe("summarizeMatches", () => {
       second: { total: 0, wins: 0, winRate: 0 },
       currentStreak: { result: null, count: 0 }
     });
+  });
+});
+
+describe("pass exclusion analysis", () => {
+  it("keeps only matches where neither player used a pass", () => {
+    const passMatches = [
+      { id: "none", myPassed: "none", opponentPassed: "none" },
+      { id: "my-pass", myPassed: "pass1", opponentPassed: "none" },
+      { id: "opponent-pass", myPassed: "none", opponentPassed: "pass2" },
+      { id: "legacy-none", myPassed: false, opponentPassed: "false" },
+      { id: "legacy-pass", myPassed: true, opponentPassed: false }
+    ];
+
+    assert.deepEqual(
+      filterMatchesWithoutPasses(passMatches).map((match) => match.id),
+      ["none", "legacy-none"]
+    );
   });
 });
 

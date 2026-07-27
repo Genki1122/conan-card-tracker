@@ -3,12 +3,14 @@ import {
   filterDecksByArchived,
   filterMatchesByEnvironment,
   filterMatchesByMonth,
+  filterMatchesWithoutPasses,
   formatRecordDate,
   getCrossBreakdown,
   getPlayerOverviews,
   getPlayerRecord,
   getRecordedRpsBreakdown,
   getStaffRpsBreakdown,
+  isPassRecorded,
   isKnownPlayerName,
   playerWinRateTone,
   sortPlayerOverviews,
@@ -513,6 +515,7 @@ function enrichMatches(matches) {
       store: session?.name || "未設定",
       date: session?.date || "",
       opponentColor: match.opponentPartnerColor ? partnerColorLabel(match.opponentPartnerColor) : "",
+      opponentCaseCard: getCaseCard(match.opponentCaseCardId)?.name || "",
       order: index
     };
   });
@@ -559,15 +562,11 @@ function relativeMonth(offset) {
 
 function splitPassRecord(matches) {
   return {
-    myNoPass: summarizeMatches(matches.filter((match) => !isPassValue(match.myPassed))),
-    myAnyPass: summarizeMatches(matches.filter((match) => isPassValue(match.myPassed))),
-    opponentNoPass: summarizeMatches(matches.filter((match) => !isPassValue(match.opponentPassed))),
-    opponentAnyPass: summarizeMatches(matches.filter((match) => isPassValue(match.opponentPassed)))
+    myNoPass: summarizeMatches(matches.filter((match) => !isPassRecorded(match.myPassed))),
+    myAnyPass: summarizeMatches(matches.filter((match) => isPassRecorded(match.myPassed))),
+    opponentNoPass: summarizeMatches(matches.filter((match) => !isPassRecorded(match.opponentPassed))),
+    opponentAnyPass: summarizeMatches(matches.filter((match) => isPassRecorded(match.opponentPassed)))
   };
-}
-
-function isPassValue(value) {
-  return !["none", false, "false", undefined, null, ""].includes(value);
 }
 
 function sortCrossRows(rows, sortKey) {
@@ -815,8 +814,10 @@ function renderSummary() {
   const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
   const selectedPivot = ["opponentDeck", "opponentColor", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
   const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
+  const excludePasses = Boolean(route.excludePasses);
   const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion);
-  const matches = filterMatchesByMonth(baseMatches, selectedMonth);
+  const monthMatches = filterMatchesByMonth(baseMatches, selectedMonth);
+  const matches = excludePasses ? filterMatchesWithoutPasses(monthMatches) : monthMatches;
   const summary = summarizeMatches(matches);
   const passRecord = splitPassRecord(matches);
   const breakdownMatches = selectedPivot === "opponentPlayer"
@@ -837,14 +838,17 @@ function renderSummary() {
         ${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}
       </select></label>
     </div>
-    <details class="analysis-filter-panel">
-      <summary>詳細条件${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length ? ` ${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length}` : ""}</summary>
-      <div class="analysis-filter-grid">
-        <label>バージョン<select data-analysis-version-select ${selectedDeckId ? "" : "disabled"}><option value="">すべて</option>${versions.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedVersion ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
-        <label>環境<select data-analysis-environment-select><option value="">すべて</option>${environments.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedEnvironment ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
-        <label>店舗<select data-analysis-store-select><option value="">すべて</option>${stores.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedStore ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
-      </div>
-    </details>
+    <div class="analysis-secondary-filters">
+      <details class="analysis-filter-panel">
+        <summary>詳細条件${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length ? ` ${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length}` : ""}</summary>
+        <div class="analysis-filter-grid">
+          <label>バージョン<select data-analysis-version-select ${selectedDeckId ? "" : "disabled"}><option value="">すべて</option>${versions.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedVersion ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
+          <label>環境<select data-analysis-environment-select><option value="">すべて</option>${environments.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedEnvironment ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
+          <label>店舗<select data-analysis-store-select><option value="">すべて</option>${stores.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedStore ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
+        </div>
+      </details>
+      <label class="analysis-pass-toggle"><input type="checkbox" data-analysis-exclude-passes ${excludePasses ? "checked" : ""}><span>パスを除く</span></label>
+    </div>
 
     <section class="analysis-hero">
       <div>
@@ -912,6 +916,7 @@ function renderSummary() {
             <span>自分パス有 ${turnRecordText(row.myAnyPass)}</span>
             <span>相手パス無 ${turnRecordText(row.opponentNoPass)}</span>
             <span>相手パス有 ${turnRecordText(row.opponentAnyPass)}</span>
+            ${selectedPivot === "opponentColor" ? colorCaseBreakdownMarkup(breakdownMatches, row.name) : ""}
             ${selectedPivot === "store" ? `<button class="matchup-store-link" type="button" data-open-store="${escapeHtml(row.name)}">店舗アーカイブ</button>` : ""}
           </div>
         </details>
@@ -1004,6 +1009,23 @@ function analysisRowName(name, pivot) {
   if (pivot !== "opponentColor") return escapeHtml(name);
   const color = partnerColors.find((item) => item.label === name);
   return `<span class="analysis-color-name"><i class="${color?.id || "unrecorded"}"></i>${escapeHtml(name)}</span>`;
+}
+
+function colorCaseBreakdownMarkup(matches, colorName) {
+  const colorMatches = matches.filter((match) => match.opponentColor === colorName);
+  const recordedMatches = colorMatches.filter((match) => match.opponentCaseCard);
+  const rows = sortCrossRows(getCrossBreakdown(recordedMatches, "opponentCaseCard"), "total");
+  return `
+    <div class="color-case-breakdown">
+      <div class="color-case-heading"><strong>事件カード別</strong><span>記録 ${recordedMatches.length}/${colorMatches.length}戦</span></div>
+      ${rows.map((row) => `
+        <div class="color-case-row">
+          <span>${escapeHtml(row.name)}</span>
+          <b>${row.wins}-${row.losses}${row.draws ? `-${row.draws}` : ""} / ${row.winRate}%</b>
+        </div>
+      `).join("") || `<p>事件カードの記録はありません</p>`}
+    </div>
+  `;
 }
 
 function playerRpsMarkup(rps, compact = false) {
@@ -1176,6 +1198,7 @@ function analysisRoute(overrides = {}) {
     month: route.month || "",
     pivot: route.pivot || "opponentDeck",
     sort: route.sort || "total",
+    excludePasses: Boolean(route.excludePasses),
     ...overrides
   };
 }
@@ -1496,6 +1519,8 @@ view.addEventListener("change", (event) => {
   if (playerMonth) setRoute({ ...route, name: "players", playerName: "", playerMonth: playerMonth.value });
   const playerEnvironment = event.target.closest("[data-player-environment]");
   if (playerEnvironment) setRoute({ ...route, name: "players", playerName: "", playerEnvironment: playerEnvironment.value });
+  const excludePasses = event.target.closest("[data-analysis-exclude-passes]");
+  if (excludePasses) setRoute(analysisRoute({ excludePasses: excludePasses.checked }));
 });
 
 function updatePlayerSearchResults(search) {

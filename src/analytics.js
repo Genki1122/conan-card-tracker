@@ -75,6 +75,14 @@ export function canWinRandomPrize(placement = "") {
   return placement !== "champion";
 }
 
+export function isPassRecorded(value) {
+  return !["none", false, "false", undefined, null, ""].includes(value);
+}
+
+export function filterMatchesWithoutPasses(matches = []) {
+  return matches.filter((match) => !isPassRecorded(match.myPassed) && !isPassRecorded(match.opponentPassed));
+}
+
 export function summarizeMatches(matches = []) {
   const total = tally(matches);
   const first = tally(matches, (match) => match.firstPlayer === "first");
