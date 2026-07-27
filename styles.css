@@ -1762,7 +1762,15 @@ textarea {
   font-size: 1.3rem;
 }
 
-.session-compact-head > button {
+.session-head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.session-head-actions > button,
+.session-head-actions > a {
+  display: grid;
+  place-items: center;
   min-width: 48px;
   min-height: 38px;
   border: 1px solid var(--line);
@@ -1771,6 +1779,12 @@ textarea {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
+  text-decoration: none;
+}
+
+.session-head-actions > .session-share-button {
+  min-width: 38px;
+  color: var(--text);
 }
 
 .session-compact-head p {

@@ -49,6 +49,10 @@ import {
   partnerColorLabel,
   partnerColors
 } from "./card-catalog.js";
+import {
+  buildSessionShareText,
+  buildXShareUrl
+} from "./session-share.js";
 import { shouldUpdateSearchFromInput } from "./ime-input.js";
 import {
   addEnvironmentCatalogItem,
@@ -764,12 +768,19 @@ function renderSession(sessionId) {
   if (!session) return setRoute({ name: "decks" });
   const rounds = matchesForSession(sessionId);
   const summary = summarizeMatches(rounds);
+  const deck = getDeck(session.deckId);
+  const shareUrl = buildXShareUrl(buildSessionShareText({ session, deck, matches: rounds }));
 
   title.textContent = session.name;
   view.innerHTML = `
     <section class="session-compact-head">
       <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b></div>
-      ${adminPreview ? `<span class="read-only-badge">閲覧専用</span>` : `<button type="button" data-edit-session="${session.id}">編集</button>`}
+      ${adminPreview ? `<span class="read-only-badge">閲覧専用</span>` : `
+        <div class="session-head-actions">
+          <button type="button" data-edit-session="${session.id}">編集</button>
+          <a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>
+        </div>
+      `}
       <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
       ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
     </section>
