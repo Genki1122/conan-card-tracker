@@ -76,7 +76,7 @@ test("provides stable session version choices without duplicates", () => {
   assert.deepEqual(sessionVersionOptions(state, "deck-a", "大会用"), ["大会用", "v3", "v1", "v2"]);
 });
 
-test("removes 'さん' and everything after it from all recorded player names", () => {
+test("keeps 'さん' and removes only the characters after it", () => {
   const state = {
     ...baseState,
     matches: [
@@ -89,10 +89,10 @@ test("removes 'さん' and everything after it from all recorded player names", 
 
   const result = trimPlayerNamesAtHonorific(state);
 
-  assert.equal(result.affected, 2);
+  assert.equal(result.affected, 1);
   assert.deepEqual(result.state.matches.map((match) => match.opponentPlayer), [
-    "プレイヤーA",
-    "プレイヤーA",
+    "プレイヤーAさん",
+    "プレイヤーAさん",
     "佐藤",
     "不明"
   ]);
@@ -114,12 +114,10 @@ test("previews every player-name change without modifying match records", () => 
 
   assert.deepEqual(preview, {
     totalMatches: 5,
-    affectedMatches: 4,
-    affectedNames: 3,
+    affectedMatches: 2,
+    affectedNames: 1,
     changes: [
-      { from: "プレイヤーAさん入力中", to: "プレイヤーA", matches: 2 },
-      { from: "プレイヤーAさん", to: "プレイヤーA", matches: 1 },
-      { from: "プレイヤーBさん", to: "プレイヤーB", matches: 1 }
+      { from: "プレイヤーAさん入力中", to: "プレイヤーAさん", matches: 2 }
     ]
   });
   assert.equal(state.matches[0].opponentPlayer, "プレイヤーAさん入力中");

@@ -2041,7 +2041,7 @@ dialogFields.addEventListener("click", (event) => {
   if (event.target.closest("[data-trim-player-honorific]")) {
     const preview = previewPlayerNameHonorificTrim(state);
     if (!preview.affectedMatches) {
-      dataSettingsMessage = "「さん」を含むプレイヤー名はありません";
+      dataSettingsMessage = "「さん」の後ろに文字が続くプレイヤー名はありません";
       openDialog("dataSettings");
       return;
     }
@@ -2765,7 +2765,7 @@ function dataSettingsMarkup() {
     </details>
     <details class="import-panel">
       <summary>プレイヤー名を一括編集</summary>
-      <p class="form-note">全履歴のプレイヤー名から、最初の「さん」とそれ以降を削除します。実行前に変更内容を確認できます。</p>
+      <p class="form-note">全履歴のプレイヤー名から、最初の「さん」より後に続く文字だけを削除します。「さん」で終わる名前は変更しません。</p>
       <button class="primary-button inline-action" type="button" data-trim-player-honorific>変更内容を確認</button>
     </details>
     <details class="import-panel">
@@ -2807,7 +2807,7 @@ function playerNameTrimPreviewMarkup(preview) {
           </div>
         `).join("")}
       </div>
-      <p class="form-note batch-change-warning">名前自体に「さん」を含む場合も対象です。内容を確認してから実行してください。</p>
+      <p class="form-note batch-change-warning">最初に現れる「さん」より後だけを削除し、「さん」は残します。内容を確認してから実行してください。</p>
       <button class="primary-button inline-action" type="button" data-confirm-trim-player-honorific>この内容で名前を変更</button>
     </section>
   `;

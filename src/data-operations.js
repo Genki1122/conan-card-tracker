@@ -51,7 +51,7 @@ function playerNameWithoutHonorific(value) {
   const name = String(value || "").trim();
   const honorificIndex = name.indexOf("さん");
   if (honorificIndex <= 0) return name;
-  return name.slice(0, honorificIndex).trim() || name;
+  return name.slice(0, honorificIndex + "さん".length).trim() || name;
 }
 
 export function previewPlayerNameHonorificTrim(state) {
