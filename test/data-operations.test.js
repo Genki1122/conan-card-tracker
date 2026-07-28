@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   sessionVersionOptions,
   mergeStoreName,
+  previewPlayerNameHonorificTrim,
   renameEnvironmentInState,
   trimPlayerNamesAtHonorific,
   updateSessionDeck
@@ -79,8 +80,8 @@ test("removes 'さん' and everything after it from all recorded player names", 
   const state = {
     ...baseState,
     matches: [
-      { id: "match-1", opponentPlayer: "とぅーるさんとぅ" },
-      { id: "match-2", opponentPlayer: "とぅーるさん" },
+      { id: "match-1", opponentPlayer: "プレイヤーAさん入力中" },
+      { id: "match-2", opponentPlayer: "プレイヤーAさん" },
       { id: "match-3", opponentPlayer: "佐藤" },
       { id: "match-4", opponentPlayer: "不明" }
     ]
@@ -90,9 +91,36 @@ test("removes 'さん' and everything after it from all recorded player names", 
 
   assert.equal(result.affected, 2);
   assert.deepEqual(result.state.matches.map((match) => match.opponentPlayer), [
-    "とぅーる",
-    "とぅーる",
+    "プレイヤーA",
+    "プレイヤーA",
     "佐藤",
     "不明"
   ]);
+});
+
+test("previews every player-name change without modifying match records", () => {
+  const state = {
+    ...baseState,
+    matches: [
+      { id: "match-1", opponentPlayer: "プレイヤーAさん入力中" },
+      { id: "match-2", opponentPlayer: "プレイヤーAさん入力中" },
+      { id: "match-3", opponentPlayer: "プレイヤーAさん" },
+      { id: "match-4", opponentPlayer: "プレイヤーBさん" },
+      { id: "match-5", opponentPlayer: "プレイヤーC" }
+    ]
+  };
+
+  const preview = previewPlayerNameHonorificTrim(state);
+
+  assert.deepEqual(preview, {
+    totalMatches: 5,
+    affectedMatches: 4,
+    affectedNames: 3,
+    changes: [
+      { from: "プレイヤーAさん入力中", to: "プレイヤーA", matches: 2 },
+      { from: "プレイヤーAさん", to: "プレイヤーA", matches: 1 },
+      { from: "プレイヤーBさん", to: "プレイヤーB", matches: 1 }
+    ]
+  });
+  assert.equal(state.matches[0].opponentPlayer, "プレイヤーAさん入力中");
 });

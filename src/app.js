@@ -36,6 +36,7 @@ import {
 } from "./account-storage.js";
 import {
   mergeStoreName,
+  previewPlayerNameHonorificTrim,
   renameEnvironmentInState,
   sessionVersionOptions,
   trimPlayerNamesAtHonorific,
@@ -1314,6 +1315,16 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${dataSettingsMarkup()}`;
   }
 
+  if (mode === "playerNameTrimPreview") {
+    dialogKicker.textContent = "Data";
+    dialogTitle.textContent = "変更内容を確認";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `
+      <button class="sheet-back-button" type="button" data-open-menu-panel="dataSettings">‹ データ管理</button>
+      ${playerNameTrimPreviewMarkup(previewPlayerNameHonorificTrim(state))}
+    `;
+  }
+
   if (mode === "session") {
     dialogSubmit.hidden = false;
     dialogKicker.textContent = "Session";
@@ -2028,18 +2039,27 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-trim-player-honorific]")) {
-    const result = trimPlayerNamesAtHonorific(state);
-    if (!result.affected) {
+    const preview = previewPlayerNameHonorificTrim(state);
+    if (!preview.affectedMatches) {
       dataSettingsMessage = "「さん」を含むプレイヤー名はありません";
       openDialog("dataSettings");
       return;
     }
-    const confirmed = confirm(`全プレイヤー名から「さん」とそれ以降を削除しますか？\n例: とぅーるさんとぅ → とぅーる\n${result.affected}試合が変更されます。`);
-    if (!confirmed) return;
+    openDialog("playerNameTrimPreview");
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-trim-player-honorific]")) {
+    const result = trimPlayerNamesAtHonorific(state);
+    if (!result.affected) {
+      dataSettingsMessage = "変更対象のプレイヤー名はありません";
+      openDialog("dataSettings");
+      return;
+    }
     state = result.state;
     saveState();
     updateSuggestions();
-    dataSettingsMessage = `${result.affected}試合のプレイヤー名から「さん」以降を削除しました`;
+    dataSettingsMessage = `${result.affected}試合のプレイヤー名を変更しました。試合データは削除されていません`;
     openDialog("dataSettings");
     return;
   }
@@ -2745,8 +2765,8 @@ function dataSettingsMarkup() {
     </details>
     <details class="import-panel">
       <summary>プレイヤー名を一括編集</summary>
-      <p class="form-note">全履歴のプレイヤー名から「さん」とそれ以降を削除します。例: とぅーるさんとぅ → とぅーる</p>
-      <button class="primary-button inline-action" type="button" data-trim-player-honorific>「さん」以降を削除</button>
+      <p class="form-note">全履歴のプレイヤー名から、最初の「さん」とそれ以降を削除します。実行前に変更内容を確認できます。</p>
+      <button class="primary-button inline-action" type="button" data-trim-player-honorific>変更内容を確認</button>
     </details>
     <details class="import-panel">
       <summary>店舗名を統合</summary>
@@ -2760,6 +2780,36 @@ function dataSettingsMarkup() {
       <label>JSONデータ<textarea name="importJson" rows="5" placeholder="PCでコピーしたJSONを貼り付け"></textarea></label>
       <button class="primary-button inline-action" type="button" data-import-json>インポート</button>
     </details>
+  `;
+}
+
+function playerNameTrimPreviewMarkup(preview) {
+  const unchangedMatches = preview.totalMatches - preview.affectedMatches;
+  return `
+    <section class="batch-change-preview">
+      <div class="batch-change-summary">
+        <div><strong>${preview.affectedMatches}<small> / ${preview.totalMatches}</small></strong><span>試合の名前を変更</span></div>
+        <div><strong>${preview.affectedNames}</strong><span>種類の名前が対象</span></div>
+      </div>
+      <div class="batch-change-assurance" role="note">
+        <strong>試合データは削除されません</strong>
+        <span>${unchangedMatches}試合は変更されず、以下のプレイヤー名だけを書き換えます。</span>
+      </div>
+      <div class="batch-change-list" aria-label="プレイヤー名の変更内容">
+        ${preview.changes.map((change) => `
+          <div class="batch-change-row">
+            <div>
+              <span>${escapeHtml(change.from)}</span>
+              <b aria-hidden="true">→</b>
+              <strong>${escapeHtml(change.to)}</strong>
+            </div>
+            <small>${change.matches}試合</small>
+          </div>
+        `).join("")}
+      </div>
+      <p class="form-note batch-change-warning">名前自体に「さん」を含む場合も対象です。内容を確認してから実行してください。</p>
+      <button class="primary-button inline-action" type="button" data-confirm-trim-player-honorific>この内容で名前を変更</button>
+    </section>
   `;
 }
 

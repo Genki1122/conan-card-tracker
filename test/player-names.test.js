@@ -8,17 +8,17 @@ import {
 
 test("selecting a player suggestion replaces the entire composing value", () => {
   assert.equal(
-    replaceWithPlayerNameSuggestion("とぅーるさんとぅ", "とぅーるさん"),
-    "とぅーるさん"
+    replaceWithPlayerNameSuggestion("プレイヤーAさん入力中", "プレイヤーAさん"),
+    "プレイヤーAさん"
   );
 });
 
 test("player suggestions prioritize names that begin with the current input", () => {
   assert.deepEqual(
     filterPlayerNameSuggestions(
-      ["佐藤さん", "とぅーるさん", "とまとさん", "みとさん"],
+      ["佐藤さん", "とけいさん", "とまとさん", "みとさん"],
       "と"
     ),
-    ["とぅーるさん", "とまとさん", "みとさん"]
+    ["とけいさん", "とまとさん", "みとさん"]
   );
 });

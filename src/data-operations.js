@@ -47,14 +47,43 @@ export function renameEnvironmentInState(state, from, to) {
   };
 }
 
+function playerNameWithoutHonorific(value) {
+  const name = String(value || "").trim();
+  const honorificIndex = name.indexOf("さん");
+  if (honorificIndex <= 0) return name;
+  return name.slice(0, honorificIndex).trim() || name;
+}
+
+export function previewPlayerNameHonorificTrim(state) {
+  const changesByName = new Map();
+  let affectedMatches = 0;
+
+  for (const match of state.matches) {
+    const from = String(match.opponentPlayer || "").trim();
+    const to = playerNameWithoutHonorific(from);
+    if (!from || from === to) continue;
+    affectedMatches += 1;
+    const current = changesByName.get(from) || { from, to, matches: 0 };
+    current.matches += 1;
+    changesByName.set(from, current);
+  }
+
+  const changes = [...changesByName.values()]
+    .sort((a, b) => b.matches - a.matches);
+  return {
+    totalMatches: state.matches.length,
+    affectedMatches,
+    affectedNames: changes.length,
+    changes
+  };
+}
+
 export function trimPlayerNamesAtHonorific(state) {
   let affected = 0;
   const matches = state.matches.map((match) => {
     const name = String(match.opponentPlayer || "").trim();
-    const honorificIndex = name.indexOf("さん");
-    if (honorificIndex <= 0) return match;
-    const nextName = name.slice(0, honorificIndex).trim();
-    if (!nextName || nextName === name) return match;
+    const nextName = playerNameWithoutHonorific(name);
+    if (nextName === name) return match;
     affected += 1;
     return { ...match, opponentPlayer: nextName };
   });
