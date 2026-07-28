@@ -37,6 +37,8 @@ python3 -m http.server 4174
 
 管理者は利用者一覧から対象者を選び、その利用者のデッキ・分析・プレイヤー・大会画面を閲覧専用で確認できます。既に初回の `schema.sql` を実行済みの場合は、追加で `supabase/admin-preview-migration.sql` を実行します。
 
+管理者の環境・対面・利用状況・データ品質集計を有効にするには、既存プロジェクトで `supabase/admin-analytics-migration.sql` を実行します。このRPCは相手プレイヤー名を返さず、名前が記録済みかどうかだけを集計用に返します。
+
 環境は全利用者共通のマスターから選択します。一般利用者は自由入力できず、superadminだけが追加・統合・名称変更・未使用環境の削除を行えます。既存プロジェクトでは追加で `supabase/environment-catalog-migration.sql` を実行してください。既存セッションにある環境名は自動でマスターへ登録されます。
 
 `anon public` keyはブラウザで使う公開キーです。`service_role` keyは絶対にアプリやGitHubへ入れないでください。

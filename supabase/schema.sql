@@ -85,7 +85,9 @@ begin
       'decks', coalesce((
         select jsonb_agg(jsonb_build_object(
           'id', deck -> 'id',
-          'name', deck -> 'name'
+          'name', deck -> 'name',
+          'partnerColor', deck -> 'partnerColor',
+          'caseCardId', deck -> 'caseCardId'
         ))
         from jsonb_array_elements(coalesce(state.data -> 'decks', '[]'::jsonb)) as deck
       ), '[]'::jsonb),
@@ -93,7 +95,15 @@ begin
         select jsonb_agg(jsonb_build_object(
           'id', session -> 'id',
           'deckId', session -> 'deckId',
-          'environment', session -> 'environment'
+          'deckVersion', session -> 'deckVersion',
+          'partnerColor', session -> 'partnerColor',
+          'caseCardId', session -> 'caseCardId',
+          'name', session -> 'name',
+          'date', session -> 'date',
+          'environment', session -> 'environment',
+          'placement', session -> 'placement',
+          'randomPrizeWon', session -> 'randomPrizeWon',
+          'randomPrizeMethod', session -> 'randomPrizeMethod'
         ))
         from jsonb_array_elements(coalesce(state.data -> 'sessions', '[]'::jsonb)) as session
       ), '[]'::jsonb),
@@ -106,7 +116,13 @@ begin
           'firstPlayer', match -> 'firstPlayer',
           'opponentRps', match -> 'opponentRps',
           'myPassed', match -> 'myPassed',
-          'opponentPassed', match -> 'opponentPassed'
+          'opponentPassed', match -> 'opponentPassed',
+          'opponentPartnerColor', match -> 'opponentPartnerColor',
+          'opponentCaseCardId', match -> 'opponentCaseCardId',
+          'opponentPlayerRecorded', case
+            when coalesce(trim(match ->> 'opponentPlayer'), '') in ('', '不明', '未登録') then false
+            else true
+          end
         ))
         from jsonb_array_elements(coalesce(state.data -> 'matches', '[]'::jsonb)) as match
       ), '[]'::jsonb)

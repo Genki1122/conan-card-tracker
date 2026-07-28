@@ -27,7 +27,11 @@ import {
   normalizeUsername,
   validateUsername
 } from "./onboarding.js";
-import { buildAdminOverview, buildAiTrainingDataset } from "./admin-analytics.js";
+import {
+  buildAdminDashboard,
+  buildAdminOverview,
+  buildAiTrainingDataset
+} from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
 import { authEmailErrorMessage } from "./auth-feedback.js";
 import {
@@ -537,6 +541,10 @@ function matchesForSession(sessionId) {
   return state.matches.filter((match) => match.sessionId === sessionId);
 }
 
+function pendingMatchesForSession(sessionId) {
+  return matchesForSession(sessionId).filter((match) => match.result === "pending");
+}
+
 function sessionsForDeck(deckId) {
   return state.sessions.filter((session) => session.deckId === deckId);
 }
@@ -660,7 +668,14 @@ function sessionResultChips(session) {
 }
 
 function sessionCardStatus(session, summary) {
-  return `<span class="session-card-status"><span class="result-chip-row">${sessionResultChips(session)}</span><span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span></span>`;
+  const pending = pendingMatchesForSession(session.id);
+  return `
+    <span class="session-card-status">
+      <span class="result-chip-row">${sessionResultChips(session)}</span>
+      ${pending.length ? `<span class="pending-match-chip" ${adminPreview ? "" : `data-open-pending-match="${pending[0].id}"`}>未確定 ${pending.length}</span>` : ""}
+      <span class="score-pill ${recordToneClass(summary)}">${sessionRecord(session.id)}</span>
+    </span>
+  `;
 }
 
 function sessionsForStore(storeName) {
@@ -803,17 +818,18 @@ function renderSession(sessionId) {
   if (!session) return setRoute({ name: "decks" });
   const rounds = matchesForSession(sessionId);
   const summary = summarizeMatches(rounds);
+  const pendingRounds = pendingMatchesForSession(sessionId);
   const deck = getDeck(session.deckId);
   const shareUrl = buildXShareUrl(buildSessionShareText({ session, deck, matches: rounds }));
 
   title.textContent = session.name;
   view.innerHTML = `
     <section class="session-compact-head">
-      <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b></div>
+      <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b>${pendingRounds.length ? `<${adminPreview ? "span" : "button"} class="pending-match-chip" ${adminPreview ? "" : `type="button" data-open-pending-match="${pendingRounds[0].id}"`}>未確定 ${pendingRounds.length}</${adminPreview ? "span" : "button"}>` : ""}</div>
       ${adminPreview ? `<span class="read-only-badge">閲覧専用</span>` : `
         <div class="session-head-actions">
           <button type="button" data-edit-session="${session.id}">編集</button>
-          <a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>
+          <a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" data-session-share data-pending-count="${pendingRounds.length}" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>
         </div>
       `}
       <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
@@ -1164,32 +1180,40 @@ function renderAdmin() {
     return;
   }
 
-  const overview = adminState.data;
+  const dashboard = buildAdminDashboard(adminState.raw, {
+    month: route.adminMonth || "",
+    environment: route.adminEnvironment || "",
+    excludePasses: Boolean(route.adminExcludePasses),
+    consentedOnly: Boolean(route.adminConsentedOnly)
+  });
+  const selectedTab = ["environment", "matchups", "usage", "quality"].includes(route.adminTab)
+    ? route.adminTab
+    : "environment";
+  const filterNote = selectedTab === "usage"
+    ? "期間・環境は大会・試合に適用"
+    : selectedTab === "quality"
+      ? "選択条件を全記録に適用"
+      : "勝率は完了試合のみ";
   view.innerHTML = `
-    <section class="admin-metrics" aria-label="利用状況">
-      ${adminMetric("登録者", overview.users)}
-      ${adminMetric("30日利用", overview.activeUsers30d)}
-      ${adminMetric("総試合", overview.matches)}
-      ${adminMetric("全体勝率", `${overview.winRate}%`)}
-      ${adminMetric("デッキ", overview.decks)}
-      ${adminMetric("大会", overview.sessions)}
+    <section class="admin-filter-bar" aria-label="管理者集計フィルター">
+      <label><span>期間</span><select data-admin-month><option value="">全期間</option>${dashboard.filterOptions.months.map((month) => `<option value="${month}" ${month === dashboard.filters.month ? "selected" : ""}>${formatMonth(month)}</option>`).join("")}</select></label>
+      <label><span>環境</span><select data-admin-environment><option value="">全環境</option>${dashboard.filterOptions.environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === dashboard.filters.environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
+      <div class="admin-filter-toggles">
+        <label><input type="checkbox" data-admin-exclude-passes ${route.adminExcludePasses ? "checked" : ""}>パスを除く</label>
+        <label><input type="checkbox" data-admin-consented-only ${route.adminConsentedOnly ? "checked" : ""}>同意者のみ</label>
+        <span>${filterNote}</span>
+      </div>
     </section>
-    <div class="admin-heading"><h2>傾向</h2><span>同意済み ${overview.aiEligibleUsers}人</span></div>
-    <section class="admin-trends">
-      ${adminTrend("自分デッキ", overview.myDecks)}
-      ${adminTrend("相手デッキ", overview.opponentDecks)}
-      ${adminTrend("環境", overview.environments, true)}
-    </section>
-    <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
-    <div class="admin-user-list">
-      ${overview.userRows.map((row) => `
-        <button class="admin-user-row" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
-          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span></div>
-          <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
-          <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
-        </button>
-      `).join("") || `<div class="empty-card">利用者データがありません</div>`}
-    </div>
+    <nav class="admin-tabs" aria-label="管理者集計">
+      ${adminTabButton("environment", "環境分析", selectedTab)}
+      ${adminTabButton("matchups", "対面分析", selectedTab)}
+      ${adminTabButton("usage", "利用状況", selectedTab)}
+      ${adminTabButton("quality", "データ品質", selectedTab)}
+    </nav>
+    ${selectedTab === "environment" ? adminEnvironmentMarkup(dashboard) : ""}
+    ${selectedTab === "matchups" ? adminMatchupMarkup(dashboard) : ""}
+    ${selectedTab === "usage" ? adminUsageMarkup(dashboard) : ""}
+    ${selectedTab === "quality" ? adminQualityMarkup(dashboard) : ""}
   `;
 }
 
@@ -1197,8 +1221,213 @@ function adminMetric(label, value) {
   return `<div><span>${label}</span><strong>${value}</strong></div>`;
 }
 
-function adminTrend(label, rows, environment = false) {
-  return `<div><strong>${label}</strong>${rows.slice(0, 5).map((row) => `<span><b>${escapeHtml(row.name)}</b><small>${environment ? `${row.matches}戦` : `${row.total}戦・${row.winRate}%`}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>`;
+function adminTabButton(id, label, selectedTab) {
+  return `<button class="${selectedTab === id ? "active" : ""}" type="button" data-admin-tab="${id}">${label}</button>`;
+}
+
+function adminEnvironmentMarkup(dashboard) {
+  const ownColorRecorded = dashboard.environment.myColors
+    .filter((row) => row.name !== "unrecorded")
+    .reduce((sum, row) => sum + row.total, 0);
+  const opponentCaseRecorded = dashboard.environment.opponentCaseCards
+    .filter((row) => row.name !== "unrecorded")
+    .reduce((sum, row) => sum + row.total, 0);
+  return `
+    <section class="admin-metrics" aria-label="環境集計概要">
+      ${adminMetric("利用者", dashboard.summary.users)}
+      ${adminMetric("大会", dashboard.summary.sessions)}
+      ${adminMetric("完了試合", dashboard.summary.matches)}
+      ${adminMetric("勝率", `${dashboard.summary.winRate}%`)}
+      ${adminMetric("色記録", `${dashboard.summary.matches ? Math.round((ownColorRecorded / dashboard.summary.matches) * 100) : 0}%`)}
+      ${adminMetric("事件記録", `${dashboard.summary.matches ? Math.round((opponentCaseRecorded / dashboard.summary.matches) * 100) : 0}%`)}
+    </section>
+    ${adminColorShare("利用者の使用色", dashboard.environment.myColors, true)}
+    ${adminColorShare("対戦相手の色", dashboard.environment.opponentColors)}
+    <section class="admin-ranking-grid">
+      ${adminRanking("使用事件カード", dashboard.environment.myCaseCards, adminCaseCardLabel)}
+      ${adminRanking("相手事件カード", dashboard.environment.opponentCaseCards, adminCaseCardLabel)}
+      ${adminRanking("使用デッキ", dashboard.environment.myDecks)}
+      ${adminRanking("相手デッキ", dashboard.environment.opponentDecks)}
+    </section>
+    ${adminColorTrendMarkup(dashboard.environment.colorTrends)}
+    <details class="admin-disclosure">
+      <summary>環境・大会結果・店舗</summary>
+      ${adminEnvironmentRows(dashboard.environment.environments)}
+      ${adminPlacementRows(dashboard.environment.placements, dashboard.environment.randomPrizes)}
+      ${adminStoreRows(dashboard.stores)}
+    </details>
+  `;
+}
+
+function adminColorShare(label, rows, open = false) {
+  const recorded = rows.filter((row) => partnerColors.some((color) => color.id === row.name));
+  const total = recorded.reduce((sum, row) => sum + row.total, 0);
+  return `
+    <details class="admin-share-card" ${open ? "open" : ""}>
+      <summary><strong>${label}</strong><span>${total}戦</span></summary>
+      ${total ? `
+        <div class="admin-color-stack" aria-label="${label}">${recorded.map((row) => `<span class="${row.name}" style="width:${(row.total / total) * 100}%" title="${adminColorLabel(row.name)} ${row.total}戦"></span>`).join("")}</div>
+        <div class="admin-color-legend">${partnerColors.map((color) => {
+          const row = recorded.find((item) => item.name === color.id);
+          return `<span><i class="${color.id}"></i>${color.label}<b>${row?.total || 0}</b><small>${row ? Math.round((row.total / total) * 100) : 0}%</small></span>`;
+        }).join("")}</div>
+      ` : `<p class="admin-empty-inline">色の記録がありません</p>`}
+    </details>
+  `;
+}
+
+function adminRanking(label, rows, nameOf = (value) => value) {
+  const recorded = rows.filter((row) => row.name !== "unrecorded").slice(0, 6);
+  return `
+    <div class="admin-ranking">
+      <strong>${label}</strong>
+      ${recorded.map((row) => `<span><b>${escapeHtml(nameOf(row.name))}</b><small>${row.total}戦・${row.winRate}%</small></span>`).join("") || `<span><b>記録なし</b></span>`}
+    </div>
+  `;
+}
+
+function adminColorTrendMarkup(trend) {
+  const rows = trend.rows.filter((row) => row.name !== "unrecorded").slice(0, 6);
+  if (!rows.length) return "";
+  return `
+    <section class="admin-panel">
+      <div class="admin-panel-head"><strong>使用色の前月差</strong><span>${formatMonth(trend.previousMonth)} → ${formatMonth(trend.currentMonth)}</span></div>
+      <div class="admin-trend-list">${rows.map((row) => `<span><b><i class="admin-color-dot ${row.name}"></i>${escapeHtml(adminColorLabel(row.name))}</b><small>${row.previous} → ${row.current}</small><strong class="${row.delta > 0 ? "up" : row.delta < 0 ? "down" : ""}">${row.delta > 0 ? "+" : ""}${row.delta}</strong></span>`).join("")}</div>
+    </section>
+  `;
+}
+
+function adminEnvironmentRows(rows) {
+  return `<div class="admin-subsection"><strong>環境別</strong>${rows.map((row) => `<span><b>${escapeHtml(row.name)}</b><small>${row.users}人・${row.sessions}大会・${row.matches}戦</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>`;
+}
+
+function adminPlacementRows(rows, randomPrizes) {
+  return `<div class="admin-subsection"><strong>大会結果</strong>${rows.map((row) => `<span><b>${escapeHtml(adminPlacementLabel(row.name))}</b><small>${row.total}大会</small></span>`).join("") || `<span><b>記録なし</b></span>`}<span><b>ランダム賞</b><small>${randomPrizes}大会</small></span></div>`;
+}
+
+function adminStoreRows(rows) {
+  return `<div class="admin-subsection"><strong>店舗</strong>${rows.slice(0, 8).map((row) => `<span><b>${escapeHtml(row.name)}</b><small>${row.users}人・${row.sessions}大会・${row.matches}戦</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>`;
+}
+
+function adminMatchupMarkup(dashboard) {
+  const matchupMap = new Map(dashboard.matchups.map((row) => [`${row.myColor}:${row.opponentColor}`, row]));
+  const selectedKey = matchupMap.has(route.adminMatchup) ? route.adminMatchup : "";
+  const selected = matchupMap.get(selectedKey);
+  return `
+    <section class="admin-metrics admin-matchup-metrics" aria-label="対面集計概要">
+      ${adminMetric("完了試合", dashboard.summary.matches)}
+      ${adminMetric("色対面記録", dashboard.matchups.reduce((sum, row) => sum + row.total, 0))}
+      ${adminMetric("全体勝率", `${dashboard.summary.winRate}%`)}
+    </section>
+    <section class="admin-matchup-panel">
+      <div class="admin-panel-head"><strong>自分色 × 相手色</strong><span>勝率 / 試合数</span></div>
+      <div class="admin-matchup-matrix">
+        <span></span>
+        ${partnerColors.map((color) => `<span class="matrix-color-head" title="${color.label}"><i class="${color.id}"></i>${color.label}</span>`).join("")}
+        ${partnerColors.map((myColor) => `
+          <span class="matrix-color-head row-head" title="${myColor.label}"><i class="${myColor.id}"></i>${myColor.label}</span>
+          ${partnerColors.map((opponentColor) => {
+            const key = `${myColor.id}:${opponentColor.id}`;
+            const row = matchupMap.get(key);
+            return row
+              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)}" type="button" data-admin-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${row.winRate}% ${row.total}戦"><b>${row.winRate}%</b><small>${row.total}</small></button>`
+              : `<span class="empty-cell">−</span>`;
+          }).join("")}
+        `).join("")}
+      </div>
+    </section>
+    ${selected ? adminMatchupDetail(selected) : `<p class="admin-empty-inline">セルを選ぶと先後と事件カードの内訳を確認できます</p>`}
+  `;
+}
+
+function adminMatchupDetail(row) {
+  return `
+    <section class="admin-panel admin-matchup-detail">
+      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.total}戦</span></div>
+      <div class="admin-turn-split">
+        <span><b>先攻 ${row.first.winRate}%</b><small>${row.first.wins}-${row.first.losses}-${row.first.draws} / ${row.first.total}戦</small></span>
+        <span><b>後攻 ${row.second.winRate}%</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
+        ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
+      </div>
+      <div class="admin-subsection compact"><strong>相手事件カード</strong>${row.opponentCaseCards.filter((item) => item.name !== "unrecorded").slice(0, 8).map((item) => `<span><b>${escapeHtml(adminCaseCardLabel(item.name))}</b><small>${item.total}戦・${item.winRate}%</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+    </section>
+  `;
+}
+
+function adminUsageMarkup(dashboard) {
+  const usage = dashboard.usage;
+  return `
+    <section class="admin-metrics" aria-label="利用状況">
+      ${adminMetric("登録者", usage.registeredUsers)}
+      ${adminMetric("初試合済", usage.activatedUsers)}
+      ${adminMetric("7日同期", usage.activeUsers7d)}
+      ${adminMetric("30日同期", usage.activeUsers30d)}
+      ${adminMetric("30日未同期", usage.inactiveUsers30d)}
+      ${adminMetric("平均試合", usage.averageMatchesPerUser)}
+    </section>
+    <section class="admin-panel">
+      <div class="admin-panel-head"><strong>月別利用</strong><span>利用者 / 大会 / 試合</span></div>
+      <div class="admin-activity-list">${usage.activityByMonth.slice(0, 12).map((row) => `<span><b>${formatMonth(row.month)}</b><small>${row.users}人</small><small>${row.sessions}大会</small><strong>${row.matches}戦</strong></span>`).join("") || `<p class="admin-empty-inline">利用記録がありません</p>`}</div>
+    </section>
+    <div class="admin-quality-note"><strong>同期日の定義</strong><span>7日・30日はクラウドデータの最終同期日時を基準にしています。</span></div>
+    <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
+    ${adminUserRows(dashboard.userRows)}
+  `;
+}
+
+function adminUserRows(rows) {
+  return `
+    <div class="admin-user-list">
+      ${rows.map((row) => `
+        <button class="admin-user-row" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
+          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span></div>
+          <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
+          <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
+        </button>
+      `).join("") || `<div class="empty-card">この条件の利用者データがありません</div>`}
+    </div>
+  `;
+}
+
+function adminQualityMarkup(dashboard) {
+  const quality = dashboard.quality;
+  return `
+    <section class="admin-metrics" aria-label="データ品質">
+      ${adminMetric("全記録", quality.totalRecords)}
+      ${adminMetric("完了", quality.completedMatches)}
+      ${adminMetric("未確定", quality.pendingMatches)}
+      ${adminMetric("同意者", quality.aiEligibleUsers)}
+      ${adminMetric("AI対象", quality.aiEligibleMatches)}
+      ${adminMetric("30日未同期", quality.staleUsers30d)}
+    </section>
+    <section class="admin-panel">
+      <div class="admin-panel-head"><strong>項目別の記録率</strong><span>記録済み / 全記録</span></div>
+      <div class="admin-quality-list">${quality.fields.map((row) => `
+        <div>
+          <span><b>${escapeHtml(row.label)}</b><small>${row.recorded}/${quality.totalRecords}・未記録 ${row.missing}</small><strong>${row.rate}%</strong></span>
+          <div><i style="width:${row.rate}%"></i></div>
+        </div>
+      `).join("")}</div>
+    </section>
+    <div class="admin-quality-note">
+      <strong>集計の読み方</strong>
+      <span>未確定は勝率・対面分析から除外されています。記録率が低い項目ほど、分析結果の偏りに注意が必要です。</span>
+    </div>
+  `;
+}
+
+function adminColorLabel(id) {
+  return partnerColors.find((color) => color.id === id)?.label || "未記録";
+}
+
+function adminCaseCardLabel(id) {
+  if (!id || id === "unrecorded") return "未記録";
+  return getCaseCard(id)?.name || id;
+}
+
+function adminPlacementLabel(value) {
+  if (value === "unrecorded") return "未記録";
+  return placementLabels[value] || value;
 }
 
 function formatAdminDate(value) {
@@ -1520,6 +1749,31 @@ entryForm.addEventListener("submit", (event) => {
 });
 
 view.addEventListener("click", (event) => {
+  const pendingMatchButton = event.target.closest("[data-open-pending-match]");
+  if (pendingMatchButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!adminPreview) openDialog("match", pendingMatchButton.dataset.openPendingMatch);
+    return;
+  }
+  const sessionShare = event.target.closest("[data-session-share]");
+  if (sessionShare && Number(sessionShare.dataset.pendingCount) > 0) {
+    const count = Number(sessionShare.dataset.pendingCount);
+    if (!confirm(`未確定の試合が${count}件あります。\n未確定試合は投稿内容に含まれません。Xを開きますか？`)) {
+      event.preventDefault();
+      return;
+    }
+  }
+  const adminTabButton = event.target.closest("[data-admin-tab]");
+  if (adminTabButton) {
+    setRoute({ ...route, name: "admin", adminTab: adminTabButton.dataset.adminTab, adminMatchup: "" });
+    return;
+  }
+  const adminMatchupButton = event.target.closest("[data-admin-matchup]");
+  if (adminMatchupButton) {
+    setRoute({ ...route, name: "admin", adminTab: "matchups", adminMatchup: adminMatchupButton.dataset.adminMatchup });
+    return;
+  }
   if (event.target.closest("[data-admin-reload]")) {
     loadAdminDashboard();
     return;
@@ -1562,6 +1816,14 @@ view.addEventListener("click", (event) => {
 });
 
 view.addEventListener("change", (event) => {
+  const adminMonth = event.target.closest("[data-admin-month]");
+  if (adminMonth) setRoute({ ...route, name: "admin", adminMonth: adminMonth.value, adminMatchup: "" });
+  const adminEnvironment = event.target.closest("[data-admin-environment]");
+  if (adminEnvironment) setRoute({ ...route, name: "admin", adminEnvironment: adminEnvironment.value, adminMatchup: "" });
+  const adminExcludePasses = event.target.closest("[data-admin-exclude-passes]");
+  if (adminExcludePasses) setRoute({ ...route, name: "admin", adminExcludePasses: adminExcludePasses.checked, adminMatchup: "" });
+  const adminConsentedOnly = event.target.closest("[data-admin-consented-only]");
+  if (adminConsentedOnly) setRoute({ ...route, name: "admin", adminConsentedOnly: adminConsentedOnly.checked, adminMatchup: "" });
   const sortSelect = event.target.closest("[data-analysis-sort]");
   if (sortSelect) setRoute(analysisRoute({ sort: sortSelect.value }));
   const deckSelect = event.target.closest("[data-analysis-deck-select]");
