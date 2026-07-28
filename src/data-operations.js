@@ -46,3 +46,17 @@ export function renameEnvironmentInState(state, from, to) {
     ))
   };
 }
+
+export function trimPlayerNamesAtHonorific(state) {
+  let affected = 0;
+  const matches = state.matches.map((match) => {
+    const name = String(match.opponentPlayer || "").trim();
+    const honorificIndex = name.indexOf("さん");
+    if (honorificIndex <= 0) return match;
+    const nextName = name.slice(0, honorificIndex).trim();
+    if (!nextName || nextName === name) return match;
+    affected += 1;
+    return { ...match, opponentPlayer: nextName };
+  });
+  return { state: { ...state, matches }, affected };
+}

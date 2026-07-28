@@ -1,3 +1,5 @@
+import { isCompletedMatch } from "./analytics.js";
+
 export function buildAdminOverview(input, now = new Date()) {
   const profiles = input.profiles || [];
   const states = input.states || [];
@@ -5,13 +7,13 @@ export function buildAdminOverview(input, now = new Date()) {
   const profilesByUser = new Map(profiles.map((profile) => [profile.user_id, profile]));
   const statesByUser = new Map(states.map((row) => [row.user_id, row]));
   const activityCutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
-  const allMatches = states.flatMap((row) => row.data?.matches || []);
+  const allMatches = states.flatMap((row) => row.data?.matches || []).filter(isCompletedMatch);
 
   const userIds = [...new Set([...profiles.map((profile) => profile.user_id), ...states.map((row) => row.user_id)])];
   const userRows = userIds.map((userId) => {
     const row = statesByUser.get(userId) || { user_id: userId, data: {}, updated_at: "" };
     const profile = profilesByUser.get(userId) || {};
-    const matches = row.data?.matches || [];
+    const matches = (row.data?.matches || []).filter(isCompletedMatch);
     const wins = matches.filter((match) => match.result === "win").length;
     const losses = matches.filter((match) => match.result === "loss").length;
     const draws = matches.filter((match) => match.result === "draw").length;
@@ -52,7 +54,7 @@ export function buildAiTrainingDataset(input) {
     .filter((row) => consentedUsers.has(row.user_id))
     .flatMap((row) => {
       const sessions = new Map((row.data?.sessions || []).map((session) => [session.id, session]));
-      return (row.data?.matches || []).map((match) => ({
+      return (row.data?.matches || []).filter(isCompletedMatch).map((match) => ({
         myDeck: match.myDeck || "未設定",
         opponentDeck: match.opponentDeck || "未設定",
         result: match.result || "unknown",
@@ -87,7 +89,7 @@ function groupedEnvironments(states) {
   const rows = new Map();
   states.forEach((row) => {
     const matchesBySession = new Map();
-    (row.data?.matches || []).forEach((match) => {
+    (row.data?.matches || []).filter(isCompletedMatch).forEach((match) => {
       matchesBySession.set(match.sessionId, (matchesBySession.get(match.sessionId) || 0) + 1);
     });
     (row.data?.sessions || []).forEach((session) => {

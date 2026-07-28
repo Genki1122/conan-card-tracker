@@ -58,6 +58,21 @@ test("does not display a random prize alongside a championship", () => {
   assert.equal(text.includes("ランダム賞"), false);
 });
 
+test("does not include pending matches in the record or round list", () => {
+  const text = buildSessionShareText({
+    session: { name: "ショップ大会" },
+    deck: { name: "鬼丸剣道" },
+    matches: [
+      { opponentDeck: "高佐", firstPlayer: "second", result: "win" },
+      { opponentDeck: "FBI", firstPlayer: "first", result: "pending" }
+    ]
+  });
+
+  assert.equal(text.includes("結果　1-0"), true);
+  assert.equal(text.includes("高佐"), true);
+  assert.equal(text.includes("FBI"), false);
+});
+
 test("creates an editable X compose URL with the generated text", () => {
   const url = new URL(buildXShareUrl("結果　3-1\n後 ○｜白単"));
 

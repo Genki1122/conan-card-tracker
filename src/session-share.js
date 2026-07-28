@@ -21,9 +21,10 @@ const resultLabels = {
 };
 
 export function buildSessionShareText({ session = {}, deck = {}, matches = [] } = {}) {
-  const wins = matches.filter((match) => match.result === "win").length;
-  const losses = matches.filter((match) => match.result === "loss").length;
-  const draws = matches.filter((match) => match.result === "draw").length;
+  const completedMatches = matches.filter((match) => resultLabels[match.result]);
+  const wins = completedMatches.filter((match) => match.result === "win").length;
+  const losses = completedMatches.filter((match) => match.result === "loss").length;
+  const draws = completedMatches.filter((match) => match.result === "draw").length;
   const record = draws ? `${wins}-${losses}-${draws}` : `${wins}-${losses}`;
   const outcomes = [];
   const placement = placementLabels[session.placement];
@@ -36,9 +37,9 @@ export function buildSessionShareText({ session = {}, deck = {}, matches = [] } 
     `結果　${record}${outcomes.length ? `　${outcomes.join("・")}` : ""}`
   ];
 
-  if (matches.length) {
+  if (completedMatches.length) {
     lines.push("");
-    matches.forEach((match) => {
+    completedMatches.forEach((match) => {
       const turn = turnLabels[match.firstPlayer] || "－";
       const result = resultLabels[match.result] || "－";
       lines.push(`${turn} ${result}｜${opponentDeckLabel(match)}`);

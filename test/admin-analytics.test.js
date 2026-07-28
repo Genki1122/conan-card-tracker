@@ -20,7 +20,8 @@ const input = {
         sessions: [{ id: "s1", deckId: "d1", environment: "9弾環境" }],
         matches: [
           { sessionId: "s1", myDeck: "鬼丸剣道", opponentDeck: "婚活警視庁", opponentPlayer: "秘密", result: "win", memo: "個人メモ" },
-          { sessionId: "s1", myDeck: "鬼丸剣道", opponentDeck: "婚活警視庁", opponentPlayer: "秘密", result: "loss", memo: "個人メモ" }
+          { sessionId: "s1", myDeck: "鬼丸剣道", opponentDeck: "婚活警視庁", opponentPlayer: "秘密", result: "loss", memo: "個人メモ" },
+          { sessionId: "s1", myDeck: "鬼丸剣道", opponentDeck: "FBI", opponentPlayer: "秘密", result: "pending", memo: "対戦中" }
         ]
       }
     },

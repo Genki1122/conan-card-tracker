@@ -3,8 +3,18 @@ function rate(wins, total) {
   return Math.round((wins / total) * 1000) / 10;
 }
 
+const completedResults = new Set(["win", "loss", "draw"]);
+
+export function isCompletedMatch(match) {
+  return completedResults.has(match?.result);
+}
+
+function completedMatches(matches = []) {
+  return matches.filter(isCompletedMatch);
+}
+
 function tally(matches, predicate = () => true) {
-  const filtered = matches.filter(predicate);
+  const filtered = completedMatches(matches).filter(predicate);
   const wins = filtered.filter((match) => match.result === "win").length;
   return {
     total: filtered.length,
@@ -14,11 +24,12 @@ function tally(matches, predicate = () => true) {
 }
 
 function currentStreak(matches) {
-  if (matches.length === 0) {
+  const completed = completedMatches(matches);
+  if (completed.length === 0) {
     return { result: null, count: 0 };
   }
 
-  const sorted = [...matches].sort((a, b) => {
+  const sorted = [...completed].sort((a, b) => {
     const dateComparison = String(a.date || "").localeCompare(String(b.date || ""));
     if (dateComparison !== 0) return dateComparison;
     return String(a.id).localeCompare(String(b.id));
@@ -37,7 +48,7 @@ function currentStreak(matches) {
 function groupedBreakdown(matches, key) {
   const groups = new Map();
 
-  matches.forEach((match) => {
+  completedMatches(matches).forEach((match) => {
     const name = groupName(match, key);
     const current = groups.get(name) || { name, total: 0, wins: 0, losses: 0, draws: 0 };
     current.total += 1;
@@ -92,7 +103,7 @@ export function summarizeMatches(matches = []) {
   const total = tally(matches);
   const first = tally(matches, (match) => match.firstPlayer === "first");
   const second = tally(matches, (match) => match.firstPlayer === "second");
-  const draws = matches.filter((match) => match.result === "draw").length;
+  const draws = completedMatches(matches).filter((match) => match.result === "draw").length;
 
   return {
     total: total.total,

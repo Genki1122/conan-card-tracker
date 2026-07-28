@@ -5,6 +5,7 @@ import {
   sessionVersionOptions,
   mergeStoreName,
   renameEnvironmentInState,
+  trimPlayerNamesAtHonorific,
   updateSessionDeck
 } from "../src/data-operations.js";
 
@@ -72,4 +73,26 @@ test("provides stable session version choices without duplicates", () => {
   };
 
   assert.deepEqual(sessionVersionOptions(state, "deck-a", "大会用"), ["大会用", "v3", "v1", "v2"]);
+});
+
+test("removes 'さん' and everything after it from all recorded player names", () => {
+  const state = {
+    ...baseState,
+    matches: [
+      { id: "match-1", opponentPlayer: "とぅーるさんとぅ" },
+      { id: "match-2", opponentPlayer: "とぅーるさん" },
+      { id: "match-3", opponentPlayer: "佐藤" },
+      { id: "match-4", opponentPlayer: "不明" }
+    ]
+  };
+
+  const result = trimPlayerNamesAtHonorific(state);
+
+  assert.equal(result.affected, 2);
+  assert.deepEqual(result.state.matches.map((match) => match.opponentPlayer), [
+    "とぅーる",
+    "とぅーる",
+    "佐藤",
+    "不明"
+  ]);
 });

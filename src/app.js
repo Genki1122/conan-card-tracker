@@ -11,6 +11,7 @@ import {
   getPlayerRecord,
   getRecordedRpsBreakdown,
   getStaffRpsBreakdown,
+  isCompletedMatch,
   isPassRecorded,
   isKnownPlayerName,
   playerWinRateTone,
@@ -37,6 +38,7 @@ import {
   mergeStoreName,
   renameEnvironmentInState,
   sessionVersionOptions,
+  trimPlayerNamesAtHonorific,
   updateSessionDeck
 } from "./data-operations.js";
 import {
@@ -54,6 +56,10 @@ import {
   buildXShareUrl
 } from "./session-share.js";
 import { shouldUpdateSearchFromInput } from "./ime-input.js";
+import {
+  filterPlayerNameSuggestions,
+  replaceWithPlayerNameSuggestion
+} from "./player-names.js";
 import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
@@ -136,9 +142,10 @@ let environmentCatalog = [];
 let environmentCatalogReady = false;
 let environmentCatalogError = "";
 let environmentCatalogMessage = "";
+let dataSettingsMessage = "";
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
-const resultLabels = { win: "Win", loss: "Lose", draw: "Draw" };
+const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
 const firstLabels = { first: "先攻", second: "後攻" };
 const passLabels = {
   none: "無し",
@@ -302,7 +309,8 @@ function normalizeState(rawState) {
       ...match,
       opponentPlayer: normalizePlayerName(match.opponentPlayer),
       opponentPartnerColor: normalizePartnerColor(match.opponentPartnerColor),
-      opponentCaseCardId: String(match.opponentCaseCardId || "")
+      opponentCaseCardId: String(match.opponentCaseCardId || ""),
+      result: ["win", "loss", "draw"].includes(match.result) ? match.result : "pending"
     }))
   };
 }
@@ -483,6 +491,32 @@ function updateSuggestions() {
 
 function optionList(values) {
   return values.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+}
+
+function knownPlayerNames() {
+  return uniqueValues(state.matches.map((match) => match.opponentPlayer).filter(isKnownPlayerName));
+}
+
+function playerNameFieldMarkup({ name, label, value, id }) {
+  const suggestionsId = `${id}-suggestions`;
+  return `
+    <div class="player-name-field">
+      <label for="${id}">${label}</label>
+      <input id="${id}" name="${name}" required value="${escapeHtml(value)}" placeholder="不明" autocomplete="off" data-player-name-input aria-autocomplete="list" aria-controls="${suggestionsId}" aria-expanded="false">
+      <div id="${suggestionsId}" class="player-name-suggestions" data-player-name-suggestions role="listbox" hidden></div>
+    </div>
+  `;
+}
+
+function updatePlayerNameSuggestions(input) {
+  const menu = input.closest(".player-name-field")?.querySelector("[data-player-name-suggestions]");
+  if (!menu) return;
+  const suggestions = filterPlayerNameSuggestions(knownPlayerNames(), input.value);
+  menu.innerHTML = suggestions.map((name) => `
+    <button type="button" role="option" data-player-name-suggestion="${escapeHtml(name)}">${escapeHtml(name)}</button>
+  `).join("");
+  menu.hidden = suggestions.length === 0;
+  input.setAttribute("aria-expanded", String(suggestions.length > 0));
 }
 
 function setRoute(nextRoute) {
@@ -828,7 +862,7 @@ function renderSummary() {
   const selectedPivot = ["opponentDeck", "opponentColor", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
   const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
   const excludePasses = Boolean(route.excludePasses);
-  const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion);
+  const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion).filter(isCompletedMatch);
   const monthMatches = filterMatchesByMonth(baseMatches, selectedMonth);
   const matches = excludePasses ? filterMatchesWithoutPasses(monthMatches) : monthMatches;
   const summary = summarizeMatches(matches);
@@ -1243,7 +1277,7 @@ function openDialog(mode, targetId = null) {
     const currentName = targetId || route.playerName || "";
     dialogFields.innerHTML = `
       <input type="hidden" name="currentPlayerName" value="${escapeHtml(currentName)}">
-      <label>新しい名前<input name="playerName" list="playerSuggestions" required value="${escapeHtml(currentName)}"></label>
+      ${playerNameFieldMarkup({ name: "playerName", label: "新しい名前", value: currentName, id: "renamePlayerName" })}
       <p class="form-note">既存の名前を指定すると、そのプレイヤーへ履歴を統合します。</p>
     `;
   }
@@ -1337,9 +1371,9 @@ function openDialog(mode, targetId = null) {
     dialogSubmit.textContent = editingMatch ? "更新" : "保存";
     dialogFields.innerHTML = `
       <input type="hidden" name="myDeck" value="${escapeHtml(editingMatch?.myDeck || deck?.name || "")}">
-      <label>プレイヤー名<input name="opponentPlayer" list="playerSuggestions" required value="${escapeHtml(normalizePlayerName(editingMatch?.opponentPlayer))}" placeholder="不明"></label>
+      ${playerNameFieldMarkup({ name: "opponentPlayer", label: "プレイヤー名", value: normalizePlayerName(editingMatch?.opponentPlayer), id: "matchOpponentPlayer" })}
       <div class="inline-fields">
-        <label>勝敗<select name="result" required>${requiredOptionTags([["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "", "選択")}</select></label>
+        <label>勝敗<select name="result">${optionTags([["pending", "未確定"], ["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "pending")}</select></label>
         <label>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
       </div>
       <details class="match-extra-fields" ${editingMatch ? "open" : ""}>
@@ -1451,7 +1485,7 @@ entryForm.addEventListener("submit", (event) => {
       opponentPlayer: normalizePlayerName(data.get("opponentPlayer")),
       opponentPartnerColor,
       opponentCaseCardId,
-      result: data.get("result"),
+      result: data.get("result") || "pending",
       firstPlayer: data.get("firstPlayer"),
       opponentRps: data.get("opponentRps"),
       myPassed: data.get("myPassed"),
@@ -1569,6 +1603,8 @@ view.addEventListener("compositionend", (event) => {
 });
 
 dialogFields.addEventListener("change", (event) => {
+  const playerInput = event.target.closest("[data-player-name-input]");
+  if (playerInput) updatePlayerNameSuggestions(playerInput);
   const sessionDeckSelect = event.target.closest("[data-session-deck-select]");
   if (sessionDeckSelect) updateSessionVersionPicker(sessionDeckSelect.value);
   const partnerColorInput = event.target.closest("[data-partner-color-input]");
@@ -1583,12 +1619,36 @@ dialogFields.addEventListener("change", (event) => {
   if (prize.disabled) prize.checked = false;
 });
 
+dialogFields.addEventListener("input", (event) => {
+  const playerInput = event.target.closest("[data-player-name-input]");
+  if (playerInput && !event.isComposing) updatePlayerNameSuggestions(playerInput);
+});
+
+dialogFields.addEventListener("compositionend", (event) => {
+  const playerInput = event.target.closest("[data-player-name-input]");
+  if (playerInput) updatePlayerNameSuggestions(playerInput);
+});
+
 dialogFields.addEventListener("focusin", (event) => {
-  const playerInput = event.target.closest("input[name='opponentPlayer']");
+  const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput?.value === "不明") playerInput.select();
+  if (playerInput) updatePlayerNameSuggestions(playerInput);
 });
 
 dialogFields.addEventListener("click", (event) => {
+  const playerSuggestion = event.target.closest("[data-player-name-suggestion]");
+  if (playerSuggestion) {
+    const field = playerSuggestion.closest(".player-name-field");
+    const input = field?.querySelector("[data-player-name-input]");
+    const menu = field?.querySelector("[data-player-name-suggestions]");
+    if (!input) return;
+    input.value = replaceWithPlayerNameSuggestion(input.value, playerSuggestion.dataset.playerNameSuggestion);
+    input.setAttribute("aria-expanded", "false");
+    if (menu) menu.hidden = true;
+    input.focus();
+    return;
+  }
+
   if (event.target.closest("[data-close-admin-preview]")) {
     dialog.close();
     closeAdminUserPreview();
@@ -1610,7 +1670,9 @@ dialogFields.addEventListener("click", (event) => {
 
   const menuPanelButton = event.target.closest("[data-open-menu-panel]");
   if (menuPanelButton) {
-    openDialog(menuPanelButton.dataset.openMenuPanel);
+    const panel = menuPanelButton.dataset.openMenuPanel;
+    if (panel === "dataSettings") dataSettingsMessage = "";
+    openDialog(panel);
     return;
   }
 
@@ -1960,7 +2022,24 @@ dialogFields.addEventListener("click", (event) => {
       String(match[field] || "").trim() === from ? { ...match, [field]: to } : match
     ));
     saveState();
-    cloudMessage = `${affected}試合の名称を「${to}」へ統合しました`;
+    dataSettingsMessage = `${affected}試合の名称を「${to}」へ統合しました`;
+    openDialog("dataSettings");
+    return;
+  }
+
+  if (event.target.closest("[data-trim-player-honorific]")) {
+    const result = trimPlayerNamesAtHonorific(state);
+    if (!result.affected) {
+      dataSettingsMessage = "「さん」を含むプレイヤー名はありません";
+      openDialog("dataSettings");
+      return;
+    }
+    const confirmed = confirm(`全プレイヤー名から「さん」とそれ以降を削除しますか？\n例: とぅーるさんとぅ → とぅーる\n${result.affected}試合が変更されます。`);
+    if (!confirmed) return;
+    state = result.state;
+    saveState();
+    updateSuggestions();
+    dataSettingsMessage = `${result.affected}試合のプレイヤー名から「さん」以降を削除しました`;
     openDialog("dataSettings");
     return;
   }
@@ -1979,7 +2058,7 @@ dialogFields.addEventListener("click", (event) => {
       route = { ...route, storeName: to };
       render();
     }
-    cloudMessage = `${result.affected}セッションの店舗名を「${to}」へ統合しました`;
+    dataSettingsMessage = `${result.affected}セッションの店舗名を「${to}」へ統合しました`;
     openDialog("dataSettings");
     return;
   }
@@ -2656,12 +2735,18 @@ function dataSettingsMarkup() {
   const stores = uniqueValues(state.sessions.map((session) => session.name));
   return `
     ${environmentMasterMarkup()}
+    ${dataSettingsMessage ? `<p class="cloud-message data-settings-message" role="status">${escapeHtml(dataSettingsMessage)}</p>` : ""}
     <details class="import-panel">
       <summary>相手デッキ名を統合</summary>
       <input type="hidden" name="mergeType" value="opponentDeck">
       <label>統合元<input name="mergeFrom" placeholder="表記揺れしている名称"></label>
       <label>統合先<input name="mergeTo" placeholder="今後使う正式名称"></label>
       <button class="primary-button inline-action" type="button" data-merge-names>名称を統合</button>
+    </details>
+    <details class="import-panel">
+      <summary>プレイヤー名を一括編集</summary>
+      <p class="form-note">全履歴のプレイヤー名から「さん」とそれ以降を削除します。例: とぅーるさんとぅ → とぅーる</p>
+      <button class="primary-button inline-action" type="button" data-trim-player-honorific>「さん」以降を削除</button>
     </details>
     <details class="import-panel">
       <summary>店舗名を統合</summary>

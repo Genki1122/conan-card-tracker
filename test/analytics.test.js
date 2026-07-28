@@ -80,6 +80,21 @@ describe("summarizeMatches", () => {
       currentStreak: { result: null, count: 0 }
     });
   });
+
+  it("excludes matches whose result is still pending", () => {
+    assert.deepEqual(summarizeMatches([
+      ...matches,
+      { id: "pending", date: "2026-06-03", result: "pending", firstPlayer: "first" }
+    ]), {
+      total: 3,
+      wins: 2,
+      losses: 1,
+      winRate: 66.7,
+      first: { total: 1, wins: 1, winRate: 100 },
+      second: { total: 2, wins: 1, winRate: 50 },
+      currentStreak: { result: "win", count: 1 }
+    });
+  });
 });
 
 describe("pass exclusion analysis", () => {
