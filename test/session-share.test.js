@@ -38,7 +38,7 @@ test("builds a compact aligned X post from a completed session", () => {
     "結果　1-1　2位・ランダム賞",
     "",
     "後 ○｜白単",
-    "先 ×｜恋と推理の剣道大会"
+    "先 × ｜恋と推理の剣道大会"
   ].join("\n"));
   assert.equal(text.includes("#コナンカード"), false);
 });

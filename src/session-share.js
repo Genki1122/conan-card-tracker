@@ -16,7 +16,7 @@ const turnLabels = {
 
 const resultLabels = {
   win: "○",
-  loss: "×",
+  loss: "× ",
   draw: "△"
 };
 
