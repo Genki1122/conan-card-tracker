@@ -6,6 +6,7 @@ import {
   filterMatchesWithoutPasses,
   formatPercentage,
   formatRecordDate,
+  formatRecordSummary,
   getColorMatchups,
   getCrossBreakdown,
   getPlayerOverviews,
@@ -14,6 +15,7 @@ import {
   getStaffRpsBreakdown,
   isCompletedMatch,
   isPassRecorded,
+  isSmallSample,
   isKnownPlayerName,
   playerWinRateTone,
   sortPlayerOverviews,
@@ -939,13 +941,13 @@ function renderSummary() {
     <section class="breakdown-panel">
       <h2>内訳</h2>
       <div class="breakdown-grid">
-        ${breakdownCard("総合", recordCompact(summary), formatPercentage(summary.winRate))}
-        ${breakdownCard("先攻", turnRecordText(summary.first), formatPercentage(summary.first.winRate))}
-        ${breakdownCard("後攻", turnRecordText(summary.second), formatPercentage(summary.second.winRate))}
-        ${breakdownCard("自分パス無", turnRecordText(passRecord.myNoPass), formatPercentage(passRecord.myNoPass.winRate))}
-        ${breakdownCard("自分パス有", turnRecordText(passRecord.myAnyPass), formatPercentage(passRecord.myAnyPass.winRate))}
-        ${breakdownCard("相手パス無", turnRecordText(passRecord.opponentNoPass), formatPercentage(passRecord.opponentNoPass.winRate))}
-        ${breakdownCard("相手パス有", turnRecordText(passRecord.opponentAnyPass), formatPercentage(passRecord.opponentAnyPass.winRate))}
+        ${breakdownCard("総合", formatRecordSummary(summary), formatPercentage(summary.winRate))}
+        ${breakdownCard("先攻", formatRecordSummary(summary.first), formatPercentage(summary.first.winRate))}
+        ${breakdownCard("後攻", formatRecordSummary(summary.second), formatPercentage(summary.second.winRate))}
+        ${breakdownCard("自分パス無", formatRecordSummary(passRecord.myNoPass), formatPercentage(passRecord.myNoPass.winRate))}
+        ${breakdownCard("自分パス有", formatRecordSummary(passRecord.myAnyPass), formatPercentage(passRecord.myAnyPass.winRate))}
+        ${breakdownCard("相手パス無", formatRecordSummary(passRecord.opponentNoPass), formatPercentage(passRecord.opponentNoPass.winRate))}
+        ${breakdownCard("相手パス有", formatRecordSummary(passRecord.opponentAnyPass), formatPercentage(passRecord.opponentAnyPass.winRate))}
       </div>
     </section>
 
@@ -1017,7 +1019,7 @@ function personalColorMatchupMarkup(rows, selected, minimumColorSamples) {
             const key = `${myColor.id}:${opponentColor.id}`;
             const row = matchupMap.get(key);
             return row
-              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)}" type="button" data-analysis-color-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${formatPercentage(row.winRate)} ${row.total}戦"><b>${formatPercentage(row.winRate)}</b><small>${row.total}</small></button>`
+              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)} ${isSmallSample(row.total) ? "small-sample" : ""}" type="button" data-analysis-color-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${formatPercentage(row.winRate)} ${row.total}戦"><b>${formatPercentage(row.winRate)}</b><small>${row.total}</small></button>`
               : `<span class="empty-cell">−</span>`;
           }).join("")}
         `).join("")}
@@ -1039,7 +1041,7 @@ function personalColorMatchupDetail(row) {
         <span><b>後攻 ${formatPercentage(row.second.winRate)}</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
         ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
       </div>
-      <div class="admin-subsection compact"><strong>相手事件カード</strong>${caseCards.map((item) => `<span><b>${escapeHtml(item.name)}</b><small>${item.total}戦・${formatPercentage(item.winRate)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+      <div class="admin-subsection compact"><strong>相手事件カード</strong>${caseCards.map((item) => `<span><b>${escapeHtml(item.name)}</b><small>${formatRecordSummary(item)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
     </section>
   `;
 }
@@ -1385,7 +1387,7 @@ function adminMatchupMarkup(dashboard) {
             const key = `${myColor.id}:${opponentColor.id}`;
             const row = matchupMap.get(key);
             return row
-              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)}" type="button" data-admin-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${row.winRate}% ${row.total}戦"><b>${row.winRate}%</b><small>${row.total}</small></button>`
+              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)} ${isSmallSample(row.total) ? "small-sample" : ""}" type="button" data-admin-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${row.winRate}% ${row.total}戦"><b>${row.winRate}%</b><small>${row.total}</small></button>`
               : `<span class="empty-cell">−</span>`;
           }).join("")}
         `).join("")}
@@ -1404,7 +1406,7 @@ function adminMatchupDetail(row) {
         <span><b>後攻 ${row.second.winRate}%</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
         ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
       </div>
-      <div class="admin-subsection compact"><strong>相手事件カード</strong>${row.opponentCaseCards.filter((item) => item.name !== "unrecorded").slice(0, 8).map((item) => `<span><b>${escapeHtml(adminCaseCardLabel(item.name))}</b><small>${item.total}戦・${item.winRate}%</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+      <div class="admin-subsection compact"><strong>相手事件カード</strong>${row.opponentCaseCards.filter((item) => item.name !== "unrecorded").slice(0, 8).map((item) => `<span><b>${escapeHtml(adminCaseCardLabel(item.name))}</b><small>${formatRecordSummary(item)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
     </section>
   `;
 }

@@ -99,10 +99,24 @@ export function formatPercentage(value) {
   return `${(Number.isFinite(numeric) ? numeric : 0).toFixed(1)}%`;
 }
 
+export function formatRecordSummary(record = {}) {
+  const total = Number(record.total) || 0;
+  const wins = Number(record.wins) || 0;
+  const draws = Number(record.draws) || 0;
+  const losses = Number.isFinite(Number(record.losses))
+    ? Number(record.losses)
+    : Math.max(0, total - wins - draws);
+  return `${wins}-${losses}-${draws} / ${total}戦`;
+}
+
+export function isSmallSample(total, minimumTotal = 11) {
+  return (Number(total) || 0) < Math.max(1, Number(minimumTotal) || 11);
+}
+
 export function summarizeMatches(matches = []) {
   const total = tally(matches);
-  const first = tally(matches, (match) => match.firstPlayer === "first");
-  const second = tally(matches, (match) => match.firstPlayer === "second");
+  const first = fullRecord(matches.filter((match) => match.firstPlayer === "first"));
+  const second = fullRecord(matches.filter((match) => match.firstPlayer === "second"));
   const draws = completedMatches(matches).filter((match) => match.result === "draw").length;
 
   return {

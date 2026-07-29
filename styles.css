@@ -1705,6 +1705,9 @@ label {
 .admin-matchup-matrix button.positive { border-color: rgba(39, 126, 199, 0.75); color: #b9ddff; }
 .admin-matchup-matrix button.neutral { border-color: rgba(229, 185, 73, 0.65); color: #ffe08a; }
 .admin-matchup-matrix button.negative { border-color: rgba(255, 77, 111, 0.65); color: #ff9eb0; }
+.admin-matchup-matrix button.small-sample.positive { border-color: rgba(39, 126, 199, 0.32); color: rgba(185, 221, 255, 0.62); }
+.admin-matchup-matrix button.small-sample.neutral { border-color: rgba(229, 185, 73, 0.28); color: rgba(255, 224, 138, 0.62); }
+.admin-matchup-matrix button.small-sample.negative { border-color: rgba(255, 77, 111, 0.28); color: rgba(255, 158, 176, 0.62); }
 .admin-matchup-matrix button.selected { box-shadow: 0 0 0 2px var(--purple); }
 
 .admin-turn-split {

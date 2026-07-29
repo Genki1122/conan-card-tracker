@@ -7,6 +7,7 @@ import {
   filterMatchesWithoutPasses,
   filterDecksByArchived,
   formatPercentage,
+  formatRecordSummary,
   formatRecordDate,
   getDeckBreakdown,
   getOpponentBreakdown,
@@ -23,6 +24,7 @@ import {
   getStaffRpsBreakdown,
   summarizeDecks,
   summarizeMatches,
+  isSmallSample,
   playerWinRateTone,
   sortPlayerOverviews
 } from "../src/analytics.js";
@@ -72,6 +74,24 @@ describe("color matchup matrix", () => {
       [["white", "red", 11]]
     );
   });
+
+  it("treats ten matches as a small sample and eleven as established", () => {
+    assert.equal(isSmallSample(10), true);
+    assert.equal(isSmallSample(11), false);
+  });
+});
+
+describe("record summary formatting", () => {
+  it("always displays wins, losses, draws, and total matches", () => {
+    assert.equal(
+      formatRecordSummary({ wins: 2, losses: 1, draws: 1, total: 4 }),
+      "2-1-1 / 4戦"
+    );
+    assert.equal(
+      formatRecordSummary({ wins: 3, total: 5 }),
+      "3-2-0 / 5戦"
+    );
+  });
 });
 
 const matches = [
@@ -111,8 +131,8 @@ describe("summarizeMatches", () => {
       wins: 2,
       losses: 1,
       winRate: 66.7,
-      first: { total: 1, wins: 1, winRate: 100 },
-      second: { total: 2, wins: 1, winRate: 50 },
+      first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+      second: { total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 },
       currentStreak: { result: "win", count: 1 }
     });
   });
@@ -123,8 +143,8 @@ describe("summarizeMatches", () => {
       wins: 0,
       losses: 0,
       winRate: 0,
-      first: { total: 0, wins: 0, winRate: 0 },
-      second: { total: 0, wins: 0, winRate: 0 },
+      first: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
+      second: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
       currentStreak: { result: null, count: 0 }
     });
   });
@@ -138,9 +158,31 @@ describe("summarizeMatches", () => {
       wins: 2,
       losses: 1,
       winRate: 66.7,
-      first: { total: 1, wins: 1, winRate: 100 },
-      second: { total: 2, wins: 1, winRate: 50 },
+      first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+      second: { total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 },
       currentStreak: { result: "win", count: 1 }
+    });
+  });
+
+  it("keeps draws separate from losses in first and second records", () => {
+    const summary = summarizeMatches([
+      { id: "draw-first", result: "draw", firstPlayer: "first" },
+      { id: "loss-second", result: "loss", firstPlayer: "second" }
+    ]);
+
+    assert.deepEqual(summary.first, {
+      total: 1,
+      wins: 0,
+      losses: 0,
+      draws: 1,
+      winRate: 0
+    });
+    assert.deepEqual(summary.second, {
+      total: 1,
+      wins: 0,
+      losses: 1,
+      draws: 0,
+      winRate: 0
     });
   });
 });
@@ -407,8 +449,8 @@ describe("session and player analytics", () => {
         losses: 1,
         draws: 0,
         winRate: 66.7,
-        first: { total: 1, wins: 1, winRate: 100 },
-        second: { total: 2, wins: 1, winRate: 50 }
+        first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+        second: { total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 }
       },
       {
         id: "deck-2",
@@ -419,8 +461,8 @@ describe("session and player analytics", () => {
         losses: 0,
         draws: 1,
         winRate: 0,
-        first: { total: 1, wins: 0, winRate: 0 },
-        second: { total: 0, wins: 0, winRate: 0 }
+        first: { total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 },
+        second: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 }
       }
     ]);
   });
