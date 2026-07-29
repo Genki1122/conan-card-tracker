@@ -383,7 +383,9 @@ button {
 
 .breakdown-card small {
   color: var(--muted);
+  font-size: 0.64rem;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .analysis-toolbar {
@@ -1476,6 +1478,10 @@ label {
   font-weight: 800;
 }
 
+.admin-panel-head > span {
+  white-space: nowrap;
+}
+
 .admin-share-card summary,
 .admin-disclosure summary {
   cursor: pointer;
@@ -1651,6 +1657,69 @@ label {
 
 .admin-subsection.compact {
   margin-top: 8px;
+}
+
+.analysis-case-row {
+  border-top: 1px solid var(--line);
+}
+
+.analysis-case-row > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 10px;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.analysis-case-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.analysis-case-row > summary b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+}
+
+.analysis-case-row > summary small {
+  color: var(--muted);
+  white-space: nowrap;
+  font-size: 0.56rem;
+}
+
+.analysis-case-row > summary::after {
+  display: block;
+  width: 10px;
+  text-align: center;
+  content: "›";
+}
+
+.analysis-case-row[open] > summary::after {
+  content: "⌄";
+}
+
+.analysis-case-turns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  padding: 0 0 7px;
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+
+.analysis-case-turns span:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.analysis-case-turns span {
+  min-width: 0;
+  font-size: 0.52rem;
+  white-space: nowrap;
 }
 
 .admin-matchup-metrics {

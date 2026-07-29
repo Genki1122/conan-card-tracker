@@ -7,6 +7,7 @@ import {
   formatPercentage,
   formatRecordDate,
   formatRecordSummary,
+  formatRecordSummaryWithRate,
   getColorMatchups,
   getCrossBreakdown,
   getPlayerOverviews,
@@ -1035,14 +1036,30 @@ function personalColorMatchupDetail(row) {
   const caseCards = row.opponentCaseCards.filter((item) => item.name !== "未設定").slice(0, 8);
   return `
     <section class="admin-panel admin-matchup-detail analysis-color-matchup-detail">
-      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.total}戦</span></div>
+      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${formatRecordSummaryWithRate(row)}</span></div>
       <div class="admin-turn-split">
         <span><b>先攻 ${formatPercentage(row.first.winRate)}</b><small>${row.first.wins}-${row.first.losses}-${row.first.draws} / ${row.first.total}戦</small></span>
         <span><b>後攻 ${formatPercentage(row.second.winRate)}</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
         ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
       </div>
-      <div class="admin-subsection compact"><strong>相手事件カード</strong>${caseCards.map((item) => `<span><b>${escapeHtml(item.name)}</b><small>${formatRecordSummary(item)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+      <div class="admin-subsection compact analysis-case-list">
+        <strong>相手事件カード</strong>
+        ${caseCards.map(matchupCaseCardDetail).join("") || `<span><b>記録なし</b></span>`}
+      </div>
     </section>
+  `;
+}
+
+function matchupCaseCardDetail(item) {
+  return `
+    <details class="analysis-case-row">
+      <summary><b>${escapeHtml(item.name)}</b><small>${formatRecordSummaryWithRate(item)}</small></summary>
+      <div class="analysis-case-turns">
+        <span>先攻 ${formatRecordSummaryWithRate(item.first)}</span>
+        <span>後攻 ${formatRecordSummaryWithRate(item.second)}</span>
+        ${item.unrecordedTurn.total ? `<span>先後未記録 ${formatRecordSummaryWithRate(item.unrecordedTurn)}</span>` : ""}
+      </div>
+    </details>
   `;
 }
 

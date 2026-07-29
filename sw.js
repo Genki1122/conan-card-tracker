@@ -1,4 +1,4 @@
-const CACHE_NAME = "conan-card-tracker-v34";
+const CACHE_NAME = "conan-card-tracker-v35";
 const ASSETS = [
   "./",
   "./index.html",

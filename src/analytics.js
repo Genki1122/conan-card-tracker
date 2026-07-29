@@ -109,6 +109,10 @@ export function formatRecordSummary(record = {}) {
   return `${wins}-${losses}-${draws} / ${total}戦`;
 }
 
+export function formatRecordSummaryWithRate(record = {}) {
+  return `${formatRecordSummary(record)} ${formatPercentage(record.winRate)}`;
+}
+
 export function isSmallSample(total, minimumTotal = 11) {
   return (Number(total) || 0) < Math.max(1, Number(minimumTotal) || 11);
 }
@@ -185,11 +189,11 @@ export function getColorMatchups(matches = [], minimumTotal = 1) {
       return {
         myColor,
         opponentColor,
-        ...fullRecord(group),
-        first: fullRecord(group.filter((match) => match.firstPlayer === "first")),
-        second: fullRecord(group.filter((match) => match.firstPlayer === "second")),
-        unrecordedTurn: fullRecord(group.filter((match) => !["first", "second"].includes(match.firstPlayer))),
-        opponentCaseCards: groupedBreakdown(group, "opponentCaseCard")
+        ...fullRecordWithTurns(group),
+        opponentCaseCards: groupedBreakdown(group, "opponentCaseCard").map((row) => ({
+          ...row,
+          ...turnRecords(group.filter((match) => groupName(match, "opponentCaseCard") === row.name))
+        }))
       };
     })
     .filter((row) => row.total >= Math.max(1, Number(minimumTotal) || 1))
@@ -210,6 +214,21 @@ function fullRecord(matches = []) {
     losses,
     draws,
     winRate: rate(wins, completed.length)
+  };
+}
+
+function fullRecordWithTurns(matches = []) {
+  return {
+    ...fullRecord(matches),
+    ...turnRecords(matches)
+  };
+}
+
+function turnRecords(matches = []) {
+  return {
+    first: fullRecord(matches.filter((match) => match.firstPlayer === "first")),
+    second: fullRecord(matches.filter((match) => match.firstPlayer === "second")),
+    unrecordedTurn: fullRecord(matches.filter((match) => !["first", "second"].includes(match.firstPlayer)))
   };
 }
 

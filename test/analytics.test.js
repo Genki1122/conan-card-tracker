@@ -8,6 +8,7 @@ import {
   filterDecksByArchived,
   formatPercentage,
   formatRecordSummary,
+  formatRecordSummaryWithRate,
   formatRecordDate,
   getDeckBreakdown,
   getOpponentBreakdown,
@@ -51,8 +52,28 @@ describe("color matchup matrix", () => {
       second: { total: 1, wins: 0, losses: 1, draws: 0, winRate: 0 },
       unrecordedTurn: { total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 },
       opponentCaseCards: [
-        { name: "外交官殺人事件", total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 },
-        { name: "浪花の連続殺人事件", total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 }
+        {
+          name: "外交官殺人事件",
+          total: 2,
+          wins: 1,
+          losses: 1,
+          draws: 0,
+          winRate: 50,
+          first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+          second: { total: 1, wins: 0, losses: 1, draws: 0, winRate: 0 },
+          unrecordedTurn: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 }
+        },
+        {
+          name: "浪花の連続殺人事件",
+          total: 1,
+          wins: 0,
+          losses: 0,
+          draws: 1,
+          winRate: 0,
+          first: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
+          second: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
+          unrecordedTurn: { total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 }
+        }
       ]
     }]);
   });
@@ -90,6 +111,10 @@ describe("record summary formatting", () => {
     assert.equal(
       formatRecordSummary({ wins: 3, total: 5 }),
       "3-2-0 / 5戦"
+    );
+    assert.equal(
+      formatRecordSummaryWithRate({ wins: 1, losses: 3, draws: 0, total: 4, winRate: 25 }),
+      "1-3-0 / 4戦 25.0%"
     );
   });
 });
