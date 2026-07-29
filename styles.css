@@ -1484,6 +1484,27 @@ label {
   white-space: nowrap;
 }
 
+.admin-sample-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.admin-sample-toggle input {
+  width: 14px;
+  min-height: 14px;
+  margin: 0;
+  accent-color: var(--purple);
+}
+
 .admin-share-card summary,
 .admin-disclosure summary {
   cursor: pointer;

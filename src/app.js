@@ -35,6 +35,7 @@ import {
   buildAdminDashboard,
   buildAdminOverview,
   buildAiTrainingDataset,
+  filterAdminMatchups,
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
@@ -1634,7 +1635,9 @@ function adminStoreRows(rows) {
 }
 
 function adminMatchupMarkup(dashboard) {
-  const matchupMap = new Map(dashboard.matchups.map((row) => [`${row.myColor}:${row.opponentColor}`, row]));
+  const minimumSamples = Boolean(route.adminMinimumColorSamples);
+  const matchupRows = filterAdminMatchups(dashboard.matchups, minimumSamples);
+  const matchupMap = new Map(matchupRows.map((row) => [`${row.myColor}:${row.opponentColor}`, row]));
   const selectedKey = matchupMap.has(route.adminMatchup) ? route.adminMatchup : "";
   const selected = matchupMap.get(selectedKey);
   return `
@@ -1644,7 +1647,13 @@ function adminMatchupMarkup(dashboard) {
       ${adminMetric("全体勝率", `${dashboard.summary.winRate}%`)}
     </section>
     <section class="admin-matchup-panel">
-      <div class="admin-panel-head"><strong>自分色 × 相手色</strong><span>勝率 / 試合数</span></div>
+      <div class="admin-panel-head">
+        <strong>自分色 × 相手色</strong>
+        <label class="admin-sample-toggle">
+          <input type="checkbox" data-admin-minimum-color-samples ${minimumSamples ? "checked" : ""}>
+          <span>11戦以上のみ</span>
+        </label>
+      </div>
       <div class="admin-matchup-matrix">
         <span></span>
         ${partnerColors.map((color) => `<span class="matrix-color-head" title="${color.label}"><i class="${color.id}"></i>${color.label}</span>`).join("")}
@@ -1660,20 +1669,30 @@ function adminMatchupMarkup(dashboard) {
         `).join("")}
       </div>
     </section>
-    ${selected ? adminMatchupDetail(selected) : `<p class="admin-empty-inline">セルを選ぶと先後と事件カードの内訳を確認できます</p>`}
+    ${selected
+      ? adminMatchupDetail(selected)
+      : `<p class="admin-empty-inline">${minimumSamples && !matchupRows.length
+        ? "11戦以上の色対面はまだありません"
+        : "セルを選ぶと先後と事件カードの内訳を確認できます"}</p>`}
   `;
 }
 
 function adminMatchupDetail(row) {
+  const caseCards = row.opponentCaseCards.filter((item) => item.name !== "unrecorded").slice(0, 8);
   return `
     <section class="admin-panel admin-matchup-detail">
-      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.total}戦</span></div>
+      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${formatRecordSummaryWithRate(row)}</span></div>
       <div class="admin-turn-split">
-        <span><b>先攻 ${row.first.winRate}%</b><small>${row.first.wins}-${row.first.losses}-${row.first.draws} / ${row.first.total}戦</small></span>
-        <span><b>後攻 ${row.second.winRate}%</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
+        <span><b>先攻 ${formatPercentage(row.first.winRate)}</b><small>${row.first.wins}-${row.first.losses}-${row.first.draws} / ${row.first.total}戦</small></span>
+        <span><b>後攻 ${formatPercentage(row.second.winRate)}</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
         ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
       </div>
-      <div class="admin-subsection compact"><strong>相手事件カード</strong>${row.opponentCaseCards.filter((item) => item.name !== "unrecorded").slice(0, 8).map((item) => `<span><b>${escapeHtml(adminCaseCardLabel(item.name))}</b><small>${formatRecordSummary(item)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+      <div class="admin-subsection compact analysis-case-list">
+        <strong>相手事件カード</strong>
+        ${caseCards
+          .map((item) => matchupCaseCardDetail({ ...item, name: adminCaseCardLabel(item.name) }))
+          .join("") || `<span><b>記録なし</b></span>`}
+      </div>
     </section>
   `;
 }
@@ -2354,6 +2373,14 @@ view.addEventListener("change", (event) => {
   if (adminExcludePasses) setRoute({ ...route, name: "admin", adminExcludePasses: adminExcludePasses.checked, adminMatchup: "" });
   const adminConsentedOnly = event.target.closest("[data-admin-consented-only]");
   if (adminConsentedOnly) setRoute({ ...route, name: "admin", adminConsentedOnly: adminConsentedOnly.checked, adminMatchup: "" });
+  const adminMinimumColorSamples = event.target.closest("[data-admin-minimum-color-samples]");
+  if (adminMinimumColorSamples) setRoute({
+    ...route,
+    name: "admin",
+    adminTab: "matchups",
+    adminMinimumColorSamples: adminMinimumColorSamples.checked,
+    adminMatchup: ""
+  });
   const adminUserStatus = event.target.closest("[data-admin-user-status]");
   if (adminUserStatus) setRoute({ ...route, name: "admin", adminTab: "users", adminUserStatus: adminUserStatus.value });
   const adminUserSort = event.target.closest("[data-admin-user-sort]");

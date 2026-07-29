@@ -177,6 +177,12 @@ export function filterAdminUsers(rows = [], filters = {}) {
   });
 }
 
+export function filterAdminMatchups(rows = [], minimumSamples = false) {
+  return minimumSamples
+    ? rows.filter((row) => Number(row.total || 0) >= 11)
+    : rows;
+}
+
 function isAiEligible(row) {
   return Boolean(row.accepted_at) && row.ai_training_included !== false;
 }
@@ -342,7 +348,17 @@ function buildColorMatchups(records) {
         first: recordSummary(group.filter((record) => record.firstPlayer === "first")),
         second: recordSummary(group.filter((record) => record.firstPlayer === "second")),
         unrecordedTurn: recordSummary(group.filter((record) => !["first", "second"].includes(record.firstPlayer))),
-        opponentCaseCards: groupedAdminRecords(group, (record) => record.opponentCaseCardId)
+        opponentCaseCards: groupedAdminRecords(group, (record) => record.opponentCaseCardId).map((item) => {
+          const caseCardRecords = group.filter((record) => (
+            String(record.opponentCaseCardId || "unrecorded").trim() === item.name
+          ));
+          return {
+            ...item,
+            first: recordSummary(caseCardRecords.filter((record) => record.firstPlayer === "first")),
+            second: recordSummary(caseCardRecords.filter((record) => record.firstPlayer === "second")),
+            unrecordedTurn: recordSummary(caseCardRecords.filter((record) => !["first", "second"].includes(record.firstPlayer)))
+          };
+        })
       };
     })
     .sort((a, b) => (

@@ -5,6 +5,7 @@ import {
   buildAdminDashboard,
   buildAdminOverview,
   buildAiTrainingDataset,
+  filterAdminMatchups,
   filterAdminUsers
 } from "../src/admin-analytics.js";
 
@@ -157,7 +158,18 @@ test("admin dashboard applies shared filters to environment and matchup analytic
     second: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
     unrecordedTurn: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
     opponentCaseCards: [
-      { name: "case-green", total: 1, wins: 1, losses: 0, draws: 0, winRate: 100, percentage: 100 }
+      {
+        name: "case-green",
+        total: 1,
+        wins: 1,
+        losses: 0,
+        draws: 0,
+        winRate: 100,
+        percentage: 100,
+        first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+        second: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 },
+        unrecordedTurn: { total: 0, wins: 0, losses: 0, draws: 0, winRate: 0 }
+      }
     ]
   });
   assert.deepEqual(dashboard.filterOptions.months, ["2026-07", "2026-06"]);
@@ -274,6 +286,54 @@ test("matchup analytics expose completed matches whose turn is unrecorded", () =
   });
 
   assert.deepEqual(dashboard.matchups[0].unrecordedTurn, {
+    total: 1,
+    wins: 0,
+    losses: 1,
+    draws: 0,
+    winRate: 0
+  });
+});
+
+test("admin matchup sample filter keeps only rows with eleven or more matches", () => {
+  const rows = [
+    { myColor: "blue", opponentColor: "green", total: 10 },
+    { myColor: "green", opponentColor: "yellow", total: 11 }
+  ];
+
+  assert.deepEqual(
+    filterAdminMatchups(rows, true).map((row) => `${row.myColor}:${row.opponentColor}`),
+    ["green:yellow"]
+  );
+  assert.equal(filterAdminMatchups(rows, false).length, 2);
+});
+
+test("admin matchup case cards include first and second records", () => {
+  const dashboard = buildAdminDashboard({
+    profiles: [{ user_id: "u1", username: "利用者" }],
+    consents: [],
+    states: [{
+      user_id: "u1",
+      updated_at: "2026-07-20T00:00:00Z",
+      data: {
+        decks: [{ id: "d1", name: "デッキ", partnerColor: "blue" }],
+        sessions: [{ id: "s1", deckId: "d1", date: "2026-07-01", environment: "10弾環境" }],
+        matches: [
+          { sessionId: "s1", result: "win", firstPlayer: "first", opponentPartnerColor: "green", opponentCaseCardId: "case-green" },
+          { sessionId: "s1", result: "loss", firstPlayer: "second", opponentPartnerColor: "green", opponentCaseCardId: "case-green" }
+        ]
+      }
+    }]
+  });
+
+  const caseCard = dashboard.matchups[0].opponentCaseCards[0];
+  assert.deepEqual(caseCard.first, {
+    total: 1,
+    wins: 1,
+    losses: 0,
+    draws: 0,
+    winRate: 100
+  });
+  assert.deepEqual(caseCard.second, {
     total: 1,
     wins: 0,
     losses: 1,
