@@ -12,6 +12,7 @@ import {
   getOpponentBreakdown,
   getOpponentTurnBreakdown,
   getAnalysisInsights,
+  getColorMatchups,
   getCrossBreakdown,
   getPlayerBreakdown,
   getPlayerOverviews,
@@ -25,6 +26,53 @@ import {
   playerWinRateTone,
   sortPlayerOverviews
 } from "../src/analytics.js";
+
+describe("color matchup matrix", () => {
+  it("groups completed matches by both partner colors with turn and case-card details", () => {
+    const rows = getColorMatchups([
+      { result: "win", firstPlayer: "first", myPartnerColor: "blue", opponentPartnerColor: "green", opponentCaseCard: "外交官殺人事件" },
+      { result: "loss", firstPlayer: "second", myPartnerColor: "blue", opponentPartnerColor: "green", opponentCaseCard: "外交官殺人事件" },
+      { result: "draw", firstPlayer: "", myPartnerColor: "blue", opponentPartnerColor: "green", opponentCaseCard: "浪花の連続殺人事件" },
+      { result: "pending", firstPlayer: "first", myPartnerColor: "blue", opponentPartnerColor: "green", opponentCaseCard: "未確定" },
+      { result: "win", firstPlayer: "first", myPartnerColor: "", opponentPartnerColor: "green" }
+    ]);
+
+    assert.deepEqual(rows, [{
+      myColor: "blue",
+      opponentColor: "green",
+      total: 3,
+      wins: 1,
+      losses: 1,
+      draws: 1,
+      winRate: 33.3,
+      first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+      second: { total: 1, wins: 0, losses: 1, draws: 0, winRate: 0 },
+      unrecordedTurn: { total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 },
+      opponentCaseCards: [
+        { name: "外交官殺人事件", total: 2, wins: 1, losses: 1, draws: 0, winRate: 50 },
+        { name: "浪花の連続殺人事件", total: 1, wins: 0, losses: 0, draws: 1, winRate: 0 }
+      ]
+    }]);
+  });
+
+  it("keeps only cells at or above the requested sample size", () => {
+    const tenMatches = Array.from({ length: 10 }, () => ({
+      result: "win",
+      myPartnerColor: "red",
+      opponentPartnerColor: "white"
+    }));
+    const elevenMatches = Array.from({ length: 11 }, () => ({
+      result: "loss",
+      myPartnerColor: "white",
+      opponentPartnerColor: "red"
+    }));
+
+    assert.deepEqual(
+      getColorMatchups([...tenMatches, ...elevenMatches], 11).map((row) => [row.myColor, row.opponentColor, row.total]),
+      [["white", "red", 11]]
+    );
+  });
+});
 
 const matches = [
   {

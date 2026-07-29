@@ -151,6 +151,54 @@ export function getCrossBreakdown(matches = [], key = "opponentDeck") {
   });
 }
 
+export function getColorMatchups(matches = [], minimumTotal = 1) {
+  const colorOrder = ["blue", "green", "white", "red", "yellow", "black"];
+  const knownColors = new Set(colorOrder);
+  const groups = new Map();
+
+  completedMatches(matches)
+    .filter((match) => knownColors.has(match.myPartnerColor) && knownColors.has(match.opponentPartnerColor))
+    .forEach((match) => {
+      const key = `${match.myPartnerColor}:${match.opponentPartnerColor}`;
+      const group = groups.get(key) || [];
+      group.push(match);
+      groups.set(key, group);
+    });
+
+  return [...groups.entries()]
+    .map(([key, group]) => {
+      const [myColor, opponentColor] = key.split(":");
+      return {
+        myColor,
+        opponentColor,
+        ...fullRecord(group),
+        first: fullRecord(group.filter((match) => match.firstPlayer === "first")),
+        second: fullRecord(group.filter((match) => match.firstPlayer === "second")),
+        unrecordedTurn: fullRecord(group.filter((match) => !["first", "second"].includes(match.firstPlayer))),
+        opponentCaseCards: groupedBreakdown(group, "opponentCaseCard")
+      };
+    })
+    .filter((row) => row.total >= Math.max(1, Number(minimumTotal) || 1))
+    .sort((a, b) => (
+      colorOrder.indexOf(a.myColor) - colorOrder.indexOf(b.myColor)
+      || colorOrder.indexOf(a.opponentColor) - colorOrder.indexOf(b.opponentColor)
+    ));
+}
+
+function fullRecord(matches = []) {
+  const completed = completedMatches(matches);
+  const wins = completed.filter((match) => match.result === "win").length;
+  const losses = completed.filter((match) => match.result === "loss").length;
+  const draws = completed.filter((match) => match.result === "draw").length;
+  return {
+    total: completed.length,
+    wins,
+    losses,
+    draws,
+    winRate: rate(wins, completed.length)
+  };
+}
+
 export function filterMatchesByMonth(matches = [], month = "") {
   if (!month) return matches;
   return matches.filter((match) => String(match.date || "").slice(0, 7) === month);

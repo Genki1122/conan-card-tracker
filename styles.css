@@ -402,6 +402,12 @@ button {
   font-weight: 900;
 }
 
+.analysis-toolbar .analysis-sample-toggle {
+  min-height: 38px;
+  padding-inline: 9px;
+  font-size: 0.72rem;
+}
+
 .session-edit-button {
   width: 100%;
   min-height: 40px;
@@ -1656,6 +1662,10 @@ label {
   grid-template-columns: 28px repeat(6, minmax(0, 1fr));
   gap: 2px;
   margin-top: 8px;
+}
+
+.analysis-color-matchup-panel {
+  margin-top: 0;
 }
 
 .matrix-color-head {

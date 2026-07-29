@@ -6,6 +6,7 @@ import {
   filterMatchesWithoutPasses,
   formatPercentage,
   formatRecordDate,
+  getColorMatchups,
   getCrossBreakdown,
   getPlayerOverviews,
   getPlayerRecord,
@@ -557,12 +558,14 @@ function matchesForDeck(deckId) {
 function enrichMatches(matches) {
   return matches.map((match, index) => {
     const session = getSession(match.sessionId);
+    const deck = getDeck(session?.deckId);
     return {
       ...match,
       environment: session?.environment || "未設定",
       deckVersion: session?.deckVersion || "v1",
       store: session?.name || "未設定",
       date: session?.date || "",
+      myPartnerColor: session?.partnerColor || deck?.partnerColor || "",
       opponentColor: match.opponentPartnerColor ? partnerColorLabel(match.opponentPartnerColor) : "",
       opponentCaseCard: getCaseCard(match.opponentCaseCardId)?.name || "",
       order: index
@@ -876,9 +879,10 @@ function renderSummary() {
   const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
   const months = analysisMonths();
   const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
-  const selectedPivot = ["opponentDeck", "opponentColor", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
+  const selectedPivot = ["opponentDeck", "opponentColor", "colorMatrix", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
   const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
   const excludePasses = Boolean(route.excludePasses);
+  const minimumColorSamples = Boolean(route.minimumColorSamples);
   const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion).filter(isCompletedMatch);
   const monthMatches = filterMatchesByMonth(baseMatches, selectedMonth);
   const matches = excludePasses ? filterMatchesWithoutPasses(monthMatches) : monthMatches;
@@ -889,7 +893,13 @@ function renderSummary() {
     : selectedPivot === "opponentColor"
       ? matches.filter((match) => match.opponentColor)
       : matches;
-  const rows = sortCrossRows(getCrossBreakdown(breakdownMatches, selectedPivot), selectedSort);
+  const rows = selectedPivot === "colorMatrix"
+    ? []
+    : sortCrossRows(getCrossBreakdown(breakdownMatches, selectedPivot), selectedSort);
+  const colorMatchups = getColorMatchups(matches, minimumColorSamples ? 11 : 1);
+  const selectedColorMatchup = colorMatchups.find((row) => (
+    `${row.myColor}:${row.opponentColor}` === route.colorMatchup
+  ));
 
   view.innerHTML = `
     <div class="analysis-primary-filters">
@@ -941,14 +951,15 @@ function renderSummary() {
 
     <div class="analysis-toolbar">
       <h2 class="section-title tight-title">クロス集計</h2>
-      <select data-analysis-sort aria-label="並び替え">
-        ${optionTags([["total", "試合数順"], ["low", "勝率低い順"], ["high", "勝率高い順"]], selectedSort)}
-      </select>
+      ${selectedPivot === "colorMatrix"
+        ? `<label class="analysis-pass-toggle analysis-sample-toggle"><input type="checkbox" data-analysis-minimum-color-samples ${minimumColorSamples ? "checked" : ""}><span>11戦以上のみ</span></label>`
+        : `<select data-analysis-sort aria-label="並び替え">${optionTags([["total", "試合数順"], ["low", "勝率低い順"], ["high", "勝率高い順"]], selectedSort)}</select>`}
     </div>
     <div class="deck-tabs filter-tabs" aria-label="集計軸">
       ${[
         ["opponentDeck", "相手デッキ"],
         ["opponentColor", "相手色"],
+        ["colorMatrix", "色対面表"],
         ["myDeck", "自分デッキ"],
         ["month", "月別"],
         ["deckVersion", "バージョン"],
@@ -959,33 +970,77 @@ function renderSummary() {
         <button class="${value === selectedPivot ? "active" : ""}" type="button" data-analysis-pivot="${value}">${label}</button>
       `).join("")}
     </div>
-    <div class="matchup-list">
-      ${rows.map((row) => `
-        <details class="matchup-row">
-          <summary>
-            <div>
-              <strong>${analysisRowName(row.name, selectedPivot)}</strong>
-              <span>${row.wins}勝 ${row.losses}敗 ${row.draws}分 / ${row.total}戦 ${sampleLabel(row.total)}</span>
-              <span>先 ${recordCompact(row.first)} / 後 ${recordCompact(row.second)}</span>
-            </div>
-            <div class="matchup-rate">
-              <b>${formatPercentage(row.winRate)}</b>
-              <div class="rps-track"><div class="progress-fill" style="width:${row.winRate}%"></div></div>
-            </div>
-          </summary>
-          <div class="matchup-detail">
-            <span>先攻 ${turnRecordText(row.first)}</span>
-            <span>後攻 ${turnRecordText(row.second)}</span>
-            <span>自分パス無 ${turnRecordText(row.myNoPass)}</span>
-            <span>自分パス有 ${turnRecordText(row.myAnyPass)}</span>
-            <span>相手パス無 ${turnRecordText(row.opponentNoPass)}</span>
-            <span>相手パス有 ${turnRecordText(row.opponentAnyPass)}</span>
-            ${selectedPivot === "opponentColor" ? colorCaseBreakdownMarkup(breakdownMatches, row.name) : ""}
-            ${selectedPivot === "store" ? `<button class="matchup-store-link" type="button" data-open-store="${escapeHtml(row.name)}">店舗アーカイブ</button>` : ""}
-          </div>
-        </details>
-      `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
-    </div>
+    ${selectedPivot === "colorMatrix"
+      ? personalColorMatchupMarkup(colorMatchups, selectedColorMatchup, minimumColorSamples)
+      : `<div class="matchup-list">
+          ${rows.map((row) => `
+            <details class="matchup-row">
+              <summary>
+                <div>
+                  <strong>${analysisRowName(row.name, selectedPivot)}</strong>
+                  <span>${row.wins}勝 ${row.losses}敗 ${row.draws}分 / ${row.total}戦 ${sampleLabel(row.total)}</span>
+                  <span>先 ${recordCompact(row.first)} / 後 ${recordCompact(row.second)}</span>
+                </div>
+                <div class="matchup-rate">
+                  <b>${formatPercentage(row.winRate)}</b>
+                  <div class="rps-track"><div class="progress-fill" style="width:${row.winRate}%"></div></div>
+                </div>
+              </summary>
+              <div class="matchup-detail">
+                <span>先攻 ${turnRecordText(row.first)}</span>
+                <span>後攻 ${turnRecordText(row.second)}</span>
+                <span>自分パス無 ${turnRecordText(row.myNoPass)}</span>
+                <span>自分パス有 ${turnRecordText(row.myAnyPass)}</span>
+                <span>相手パス無 ${turnRecordText(row.opponentNoPass)}</span>
+                <span>相手パス有 ${turnRecordText(row.opponentAnyPass)}</span>
+                ${selectedPivot === "opponentColor" ? colorCaseBreakdownMarkup(breakdownMatches, row.name) : ""}
+                ${selectedPivot === "store" ? `<button class="matchup-store-link" type="button" data-open-store="${escapeHtml(row.name)}">店舗アーカイブ</button>` : ""}
+              </div>
+            </details>
+          `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
+        </div>`}
+  `;
+}
+
+function personalColorMatchupMarkup(rows, selected, minimumColorSamples) {
+  const matchupMap = new Map(rows.map((row) => [`${row.myColor}:${row.opponentColor}`, row]));
+  const selectedKey = selected ? `${selected.myColor}:${selected.opponentColor}` : "";
+  return `
+    <section class="admin-matchup-panel analysis-color-matchup-panel">
+      <div class="admin-panel-head"><strong>自分色 × 相手色</strong><span>勝率 / 試合数</span></div>
+      <div class="admin-matchup-matrix">
+        <span></span>
+        ${partnerColors.map((color) => `<span class="matrix-color-head" title="${color.label}"><i class="${color.id}"></i>${color.label}</span>`).join("")}
+        ${partnerColors.map((myColor) => `
+          <span class="matrix-color-head row-head" title="${myColor.label}"><i class="${myColor.id}"></i>${myColor.label}</span>
+          ${partnerColors.map((opponentColor) => {
+            const key = `${myColor.id}:${opponentColor.id}`;
+            const row = matchupMap.get(key);
+            return row
+              ? `<button class="${selectedKey === key ? "selected" : ""} ${playerWinRateTone(row.winRate)}" type="button" data-analysis-color-matchup="${key}" aria-label="${myColor.label}対${opponentColor.label} ${formatPercentage(row.winRate)} ${row.total}戦"><b>${formatPercentage(row.winRate)}</b><small>${row.total}</small></button>`
+              : `<span class="empty-cell">−</span>`;
+          }).join("")}
+        `).join("")}
+      </div>
+    </section>
+    ${selected
+      ? personalColorMatchupDetail(selected)
+      : `<p class="admin-empty-inline">${minimumColorSamples && !rows.length ? "11戦以上の色対面はまだありません" : "セルを選ぶと先後と事件カードの内訳を確認できます"}</p>`}
+  `;
+}
+
+function personalColorMatchupDetail(row) {
+  const caseCards = row.opponentCaseCards.filter((item) => item.name !== "未設定").slice(0, 8);
+  return `
+    <section class="admin-panel admin-matchup-detail analysis-color-matchup-detail">
+      <div class="admin-panel-head"><strong>${escapeHtml(adminColorLabel(row.myColor))} × ${escapeHtml(adminColorLabel(row.opponentColor))}</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.total}戦</span></div>
+      <div class="admin-turn-split">
+        <span><b>先攻 ${formatPercentage(row.first.winRate)}</b><small>${row.first.wins}-${row.first.losses}-${row.first.draws} / ${row.first.total}戦</small></span>
+        <span><b>後攻 ${formatPercentage(row.second.winRate)}</b><small>${row.second.wins}-${row.second.losses}-${row.second.draws} / ${row.second.total}戦</small></span>
+        ${row.unrecordedTurn.total ? `<span><b>先後未記録 ${row.unrecordedTurn.total}戦</b><small>${row.unrecordedTurn.wins}-${row.unrecordedTurn.losses}-${row.unrecordedTurn.draws}</small></span>` : ""}
+      </div>
+      <div class="admin-subsection compact"><strong>相手事件カード</strong>${caseCards.map((item) => `<span><b>${escapeHtml(item.name)}</b><small>${item.total}戦・${formatPercentage(item.winRate)}</small></span>`).join("") || `<span><b>記録なし</b></span>`}</div>
+    </section>
   `;
 }
 
@@ -1476,6 +1531,8 @@ function analysisRoute(overrides = {}) {
     pivot: route.pivot || "opponentDeck",
     sort: route.sort || "total",
     excludePasses: Boolean(route.excludePasses),
+    minimumColorSamples: Boolean(route.minimumColorSamples),
+    colorMatchup: route.colorMatchup || "",
     ...overrides
   };
 }
@@ -1797,6 +1854,7 @@ view.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-match]");
   const editSessionButton = event.target.closest("[data-edit-session]");
   const analysisPivotButton = event.target.closest("[data-analysis-pivot]");
+  const analysisColorMatchupButton = event.target.closest("[data-analysis-color-matchup]");
   const renamePlayerButton = event.target.closest("[data-rename-player]");
   const playerDirectionButton = event.target.closest("[data-player-direction]");
   const deckViewButton = event.target.closest("[data-deck-view]");
@@ -1807,7 +1865,8 @@ view.addEventListener("click", (event) => {
   if (playerButton) setRoute({ ...route, name: "playerDetail", playerName: playerButton.dataset.openPlayer });
   if (editButton && !adminPreview) openDialog("match", editButton.dataset.editMatch);
   if (editSessionButton && !adminPreview) openDialog("session", editSessionButton.dataset.editSession);
-  if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot }));
+  if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot, colorMatchup: "" }));
+  if (analysisColorMatchupButton) setRoute(analysisRoute({ pivot: "colorMatrix", colorMatchup: analysisColorMatchupButton.dataset.analysisColorMatchup }));
   if (renamePlayerButton && !adminPreview) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
   if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
   if (deckViewButton) setRoute({ name: "decks", deckView: deckViewButton.dataset.deckView === "archived" ? "archived" : "active" });
@@ -1844,6 +1903,8 @@ view.addEventListener("change", (event) => {
   if (playerEnvironment) setRoute({ ...route, name: "players", playerName: "", playerEnvironment: playerEnvironment.value });
   const excludePasses = event.target.closest("[data-analysis-exclude-passes]");
   if (excludePasses) setRoute(analysisRoute({ excludePasses: excludePasses.checked }));
+  const minimumColorSamples = event.target.closest("[data-analysis-minimum-color-samples]");
+  if (minimumColorSamples) setRoute(analysisRoute({ minimumColorSamples: minimumColorSamples.checked, colorMatchup: "" }));
 });
 
 function updatePlayerSearchResults(search) {
