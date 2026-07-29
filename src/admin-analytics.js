@@ -1,4 +1,5 @@
 import { isCompletedMatch } from "./analytics.js";
+import { qualityRows } from "./data-quality.js";
 
 export function buildAdminOverview(input, now = new Date()) {
   const profiles = input.profiles || [];
@@ -53,6 +54,7 @@ export function buildAdminDashboard(input, filters = {}, now = new Date()) {
   const profiles = input.profiles || [];
   const states = input.states || [];
   const consents = input.consents || [];
+  const recoveries = input.recoveries || [];
   const consentedUsers = new Set(consents.filter(isAiEligible).map((row) => row.user_id));
   const selectedUser = (userId) => !requestedFilters.consentedOnly || consentedUsers.has(userId);
   const selectedStates = states.filter((row) => selectedUser(row.user_id));
@@ -84,7 +86,9 @@ export function buildAdminDashboard(input, filters = {}, now = new Date()) {
     states: selectedStates,
     records: completedRecords,
     sessions: contextSessions,
-    consentedUsers
+    consentedUsers,
+    recoveries,
+    now
   });
 
   return {
@@ -150,6 +154,27 @@ export function buildAiTrainingDataset(input) {
         environment: sessions.get(match.sessionId)?.environment || "未設定"
       }));
     });
+}
+
+export function filterAdminUsers(rows = [], filters = {}) {
+  const query = String(filters.query || "").trim().toLocaleLowerCase("ja");
+  const status = filters.status || "all";
+  const sort = filters.sort || "attention";
+  const direction = filters.direction === "asc" ? 1 : -1;
+  const selected = rows.filter((row) => {
+    if (query && !String(row.username || "").toLocaleLowerCase("ja").includes(query)) return false;
+    if (status === "attention" && !row.needsAttention) return false;
+    if (status === "recovery" && !row.recovery?.active) return false;
+    if (status === "stale" && !row.stale) return false;
+    if (status === "empty" && !row.empty) return false;
+    return true;
+  });
+
+  return selected.sort((left, right) => {
+    const compared = compareAdminUsers(left, right, sort);
+    if (compared !== 0) return compared * direction;
+    return String(left.username || "").localeCompare(String(right.username || ""), "ja");
+  });
 }
 
 function isAiEligible(row) {
@@ -373,15 +398,21 @@ function buildColorTrends(records, sessions, filters) {
   };
 }
 
-function buildDashboardUserRows({ profiles, states, records, sessions, consentedUsers }) {
+function buildDashboardUserRows({ profiles, states, records, sessions, consentedUsers, recoveries, now }) {
   const profilesByUser = new Map(profiles.map((profile) => [profile.user_id, profile]));
   const statesByUser = new Map(states.map((row) => [row.user_id, row]));
+  const recoveryByUser = new Map(recoveries.map((row) => [row.user_id, row]));
+  const staleCutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
   const userIds = [...new Set([...profiles.map((row) => row.user_id), ...states.map((row) => row.user_id)])];
   return userIds.map((userId) => {
     const userRecords = records.filter((record) => record.userId === userId);
     const userSessions = sessions.filter((session) => session.userId === userId);
     const summary = recordSummary(userRecords);
     const stateRow = statesByUser.get(userId);
+    const recoveryRow = recoveryByUser.get(userId) || {};
+    const recoveryActive = ["detected", "reviewing", "saving", "failed"].includes(recoveryRow.status);
+    const empty = summary.total === 0 && userSessions.length === 0;
+    const stale = !stateRow?.updated_at || new Date(stateRow.updated_at).getTime() < staleCutoff;
     return {
       userId,
       username: profilesByUser.get(userId)?.username || "未設定",
@@ -393,9 +424,37 @@ function buildDashboardUserRows({ profiles, states, records, sessions, consented
       draws: summary.draws,
       winRate: summary.winRate,
       lastUpdated: stateRow?.updated_at || "",
-      consented: consentedUsers.has(userId)
+      consented: consentedUsers.has(userId),
+      empty,
+      stale,
+      needsAttention: recoveryActive || stale || empty,
+      recovery: {
+        active: recoveryActive,
+        status: recoveryRow.status || "",
+        decks: recoveryRow.anonymous_decks || 0,
+        sessions: recoveryRow.anonymous_sessions || 0,
+        matches: recoveryRow.anonymous_matches || 0,
+        ambiguous: recoveryRow.ambiguous_count || 0,
+        errorCode: recoveryRow.error_code || "",
+        updatedAt: recoveryRow.updated_at || ""
+      }
     };
   }).sort((a, b) => String(b.lastUpdated).localeCompare(String(a.lastUpdated)));
+}
+
+function compareAdminUsers(left, right, sort) {
+  if (sort === "attention") return attentionScore(left) - attentionScore(right);
+  if (sort === "latest") return String(left.lastUpdated || "").localeCompare(String(right.lastUpdated || ""));
+  if (["matches", "sessions", "winRate"].includes(sort)) return Number(left[sort] || 0) - Number(right[sort] || 0);
+  return 0;
+}
+
+function attentionScore(row) {
+  if (row.recovery?.status === "failed") return 5;
+  if (row.recovery?.active) return 4;
+  if (row.stale) return 3;
+  if (row.empty) return 2;
+  return row.needsAttention ? 1 : 0;
 }
 
 function buildUsageMetrics({ profiles, states, records, contextRecords, sessions, userRows, now }) {
@@ -448,19 +507,7 @@ function buildDataQuality({ records, profiles, states, consentedUsers, now }) {
     .filter((row) => new Date(row.updated_at).getTime() >= staleCutoff)
     .map((row) => row.user_id));
   const total = records.length;
-  const fields = [
-    qualityField("opponentPlayer", "プレイヤー名", records, (record) => (
-      typeof record.opponentPlayerRecorded === "boolean"
-        ? record.opponentPlayerRecorded
-        : knownValue(record.opponentPlayer, ["不明", "未登録"])
-    )),
-    qualityField("opponentDeck", "相手デッキ", records, (record) => knownValue(record.opponentDeck, ["不明", "未設定"])),
-    qualityField("myColor", "自分の色", records, (record) => knownValue(record.myPartnerColor)),
-    qualityField("opponentColor", "相手の色", records, (record) => knownValue(record.opponentPartnerColor)),
-    qualityField("myCaseCard", "自分の事件カード", records, (record) => knownValue(record.myCaseCardId)),
-    qualityField("opponentCaseCard", "相手の事件カード", records, (record) => knownValue(record.opponentCaseCardId)),
-    qualityField("environment", "環境", records, (record) => knownValue(record.environment, ["未設定"]))
-  ];
+  const fields = qualityRows(records);
   return {
     totalRecords: total,
     completedMatches: records.filter(isCompletedMatch).length,
@@ -470,16 +517,6 @@ function buildDataQuality({ records, profiles, states, consentedUsers, now }) {
     aiEligibleMatches: records.filter((record) => consentedUsers.has(record.userId) && isCompletedMatch(record)).length,
     fields
   };
-}
-
-function qualityField(key, label, records, predicate) {
-  const recorded = records.filter(predicate).length;
-  return { key, label, recorded, missing: records.length - recorded, rate: rate(recorded, records.length) };
-}
-
-function knownValue(value, unknownValues = []) {
-  const normalized = String(value || "").trim();
-  return Boolean(normalized) && !unknownValues.includes(normalized);
 }
 
 function buildStoreRows(sessions, records) {

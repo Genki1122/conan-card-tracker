@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import {
   buildAdminDashboard,
   buildAdminOverview,
-  buildAiTrainingDataset
+  buildAiTrainingDataset,
+  filterAdminUsers
 } from "../src/admin-analytics.js";
 
 const input = {
@@ -175,6 +176,54 @@ test("admin dashboard separates usage and data-quality metrics from completed re
   assert.equal(dashboard.quality.pendingMatches, 1);
   assert.equal(dashboard.quality.aiEligibleMatches, 2);
   assert.equal(dashboard.quality.fields.find((row) => row.key === "opponentDeck").recorded, 3);
+});
+
+test("admin user rows include privacy-safe recovery and support statuses", () => {
+  const dashboard = buildAdminDashboard({
+    ...input,
+    recoveries: [{
+      user_id: "u1",
+      status: "detected",
+      anonymous_matches: 23,
+      ambiguous_count: 3,
+      updated_at: "2026-07-21T00:00:00Z"
+    }]
+  }, {}, new Date("2026-07-22T00:00:00Z"));
+
+  const active = dashboard.userRows.find((row) => row.userId === "u1");
+  const empty = dashboard.userRows.find((row) => row.userId === "u2");
+
+  assert.equal(active.recovery.status, "detected");
+  assert.equal(active.recovery.matches, 23);
+  assert.equal(active.needsAttention, true);
+  assert.equal(active.stale, false);
+  assert.equal(empty.empty, true);
+  assert.equal(empty.stale, true);
+});
+
+test("admin users can be searched, filtered, and sorted for support work", () => {
+  const rows = [
+    { userId: "u1", username: "なあちゃん", matches: 20, sessions: 5, winRate: 60, lastUpdated: "2026-07-20", needsAttention: true, recovery: { active: true }, stale: false, empty: false },
+    { userId: "u2", username: "平次", matches: 50, sessions: 10, winRate: 70, lastUpdated: "2026-07-21", needsAttention: false, recovery: { active: false }, stale: false, empty: false },
+    { userId: "u3", username: "コナン", matches: 0, sessions: 0, winRate: 0, lastUpdated: "", needsAttention: true, recovery: { active: false }, stale: true, empty: true }
+  ];
+
+  assert.deepEqual(filterAdminUsers(rows, {
+    query: "なあ",
+    status: "all",
+    sort: "attention",
+    direction: "desc"
+  }).map((row) => row.userId), ["u1"]);
+  assert.deepEqual(filterAdminUsers(rows, {
+    status: "recovery",
+    sort: "latest",
+    direction: "desc"
+  }).map((row) => row.userId), ["u1"]);
+  assert.deepEqual(filterAdminUsers(rows, {
+    status: "all",
+    sort: "matches",
+    direction: "asc"
+  }).map((row) => row.userId), ["u3", "u1", "u2"]);
 });
 
 test("admin dashboard clears hidden filter values and counts privacy-safe player recording flags", () => {

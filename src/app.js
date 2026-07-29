@@ -34,14 +34,28 @@ import {
 import {
   buildAdminDashboard,
   buildAdminOverview,
-  buildAiTrainingDataset
+  buildAiTrainingDataset,
+  filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
 import { authEmailErrorMessage } from "./auth-feedback.js";
 import {
   activateAnonymousStorage,
-  activateUserStorage
+  activateUserStorage,
+  clearAnonymousStorage,
+  readAnonymousStorageSources
 } from "./account-storage.js";
+import {
+  hasAccountRecords,
+  mergeAccountStates,
+  recoverySummary
+} from "./account-recovery.js";
+import {
+  buildRepairQueue,
+  qualityFieldLabel,
+  qualityFields,
+  repairTargetForFields
+} from "./data-quality.js";
 import {
   mergeStoreName,
   previewPlayerNameHonorificTrim,
@@ -83,6 +97,7 @@ import {
   loadCloudState,
   loadEnvironmentCatalog,
   renameEnvironmentCatalogItem,
+  saveAccountRecoveryStatus,
   saveAccountSetup,
   saveCloudConfig,
   saveCloudState,
@@ -152,6 +167,7 @@ let environmentCatalogReady = false;
 let environmentCatalogError = "";
 let environmentCatalogMessage = "";
 let dataSettingsMessage = "";
+let accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -209,19 +225,6 @@ function activateUserLocalState(userId) {
   storageEpoch += 1;
   state = loadState();
 
-  if (!localStorage.getItem(storageKey)) {
-    try {
-      const legacy = JSON.parse(localStorage.getItem(legacyStorageKey)) || [];
-      if (legacy.length) {
-        state = normalizeState(removeLegacyMockState(migrateLegacyMatches(legacy)));
-        localStorage.setItem(storageKey, JSON.stringify(state));
-        localStorage.removeItem(legacyStorageKey);
-      }
-    } catch {
-      // Ignore legacy data that cannot be migrated.
-    }
-  }
-
   syncMeta = loadSyncMeta();
   cloudUpdatedAt = syncMeta.updatedAt || null;
   localDirty = Boolean(syncMeta.dirty);
@@ -247,6 +250,201 @@ function activateAnonymousLocalState() {
   cloudConflict = false;
   pendingRemoteState = null;
   route = { name: "decks" };
+}
+
+async function refreshAccountRecovery() {
+  if (!cloudStatus.signedIn || adminPreview) {
+    accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
+    return;
+  }
+  const sources = readAnonymousStorageSources(localStorage, { stateBaseKey: storageBaseKey })
+    .map((entry) => normalizeState(removeLegacyMockState(entry.state)));
+  try {
+    const legacyMatches = JSON.parse(localStorage.getItem(legacyStorageKey)) || [];
+    if (Array.isArray(legacyMatches) && legacyMatches.length) {
+      sources.push(normalizeState(removeLegacyMockState(migrateLegacyMatches(legacyMatches))));
+    }
+  } catch {
+    // A malformed legacy source is left untouched for manual recovery.
+  }
+  const anonymous = sources.length
+    ? sources.reduce((combined, source) => normalizeState(mergeAccountStates(combined, source).state))
+    : null;
+  if (!anonymous || !hasAccountRecords(anonymous)) {
+    accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
+    return;
+  }
+
+  const preview = mergeAccountStates(state, anonymous);
+  accountRecovery = { anonymous, preview, message: "", saving: false };
+  try {
+    await saveAccountRecoveryStatus({
+      status: "detected",
+      anonymous: preview.anonymous,
+      ambiguousCount: preview.ambiguous.length
+    });
+  } catch {
+    // Recovery still works locally when the optional status migration is not installed.
+  }
+}
+
+function recoveryNoticeMarkup() {
+  if (!cloudStatus.signedIn || adminPreview || !accountRecovery.preview || route.name === "recovery") return "";
+  const summary = accountRecovery.preview.anonymous;
+  return `
+    <button class="account-recovery-notice" type="button" data-open-account-recovery>
+      <span><strong>未ログイン時の記録があります</strong><small>${summary.decks}デッキ・${summary.sessions}大会・${summary.matches}試合</small></span>
+      <b>確認する</b>
+    </button>
+  `;
+}
+
+function renderRecovery() {
+  title.textContent = "データ引き継ぎ";
+  const preview = accountRecovery.preview;
+  if (!preview) {
+    view.innerHTML = `<div class="empty-card">引き継ぎ対象のデータはありません</div>`;
+    return;
+  }
+  view.innerHTML = `
+    ${accountRecovery.message ? `<p class="cloud-message recovery-page-message" role="status">${escapeHtml(accountRecovery.message)}</p>` : ""}
+    <section class="recovery-compare">
+      ${recoverySummaryCard("アカウント", preview.account)}
+      ${recoverySummaryCard("未ログイン", preview.anonymous)}
+      ${recoverySummaryCard("統合後", preview.merged, "result")}
+    </section>
+    <section class="recovery-assurance">
+      <strong>元データはクラウド保存が完了するまで削除しません</strong>
+      <span>同じIDの記録だけを自動統合し、判断が必要なものは下で確認します。</span>
+    </section>
+    ${preview.ambiguous.length ? `
+      <section class="recovery-duplicates">
+        <div><strong>重複候補 ${preview.ambiguous.length}件</strong><span>同じ記録の場合だけチェックしてください</span></div>
+        ${preview.ambiguous.map((item, index) => `
+          <label>
+            <input type="checkbox" data-recovery-duplicate="${index}">
+            <span><b>${escapeHtml(recoveryTypeLabel(item.type))}</b><small>${escapeHtml(item.label)}</small></span>
+          </label>
+        `).join("")}
+      </section>
+    ` : ""}
+    <div class="recovery-actions">
+      <button class="primary-button inline-action ghost-action" type="button" data-download-recovery-backup>統合前JSONを保存</button>
+      <button class="primary-button inline-action" type="button" data-confirm-account-recovery ${accountRecovery.saving ? "disabled" : ""}>${accountRecovery.saving ? "クラウド保存中" : "このアカウントに統合"}</button>
+    </div>
+  `;
+}
+
+function recoverySummaryCard(label, summary, className = "") {
+  return `
+    <article class="${className}">
+      <strong>${label}</strong>
+      <span>${summary.decks}<small>デッキ</small></span>
+      <span>${summary.sessions}<small>大会</small></span>
+      <span>${summary.matches}<small>試合</small></span>
+    </article>
+  `;
+}
+
+function recoveryTypeLabel(type) {
+  return ({ deck: "デッキ", session: "大会", match: "試合" })[type] || "記録";
+}
+
+function selectedRecoveryDuplicatePairs() {
+  const preview = accountRecovery.preview;
+  if (!preview) return [];
+  return [...view.querySelectorAll("[data-recovery-duplicate]:checked")]
+    .map((input) => preview.ambiguous[Number(input.dataset.recoveryDuplicate)])
+    .filter(Boolean);
+}
+
+function recoveryBackupPayload() {
+  return {
+    format: "conan-card-tracker-recovery-v1",
+    exportedAt: new Date().toISOString(),
+    userId: cloudStatus.userId,
+    account: state,
+    anonymous: accountRecovery.anonymous
+  };
+}
+
+function saveRecoveryBackup() {
+  const payload = recoveryBackupPayload();
+  const text = JSON.stringify(payload, null, 2);
+  localStorage.setItem(`conan-card-recovery-backup:${cloudStatus.userId}`, text);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `conan-card-recovery-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function confirmAccountRecovery() {
+  if (!accountRecovery.preview || !accountRecovery.anonymous || accountRecovery.saving) return;
+  saveRecoveryBackup();
+  const previousState = structuredClone(state);
+  const previousDirty = localDirty;
+  const previousUpdatedAt = cloudUpdatedAt;
+  const merged = mergeAccountStates(state, accountRecovery.anonymous, {
+    sameRecordPairs: selectedRecoveryDuplicatePairs()
+  });
+  accountRecovery = { ...accountRecovery, preview: merged, saving: true, message: "統合内容をクラウドへ保存しています" };
+  render();
+  try {
+    await saveAccountRecoveryStatus({
+      status: "saving",
+      anonymous: merged.anonymous,
+      ambiguousCount: merged.ambiguous.length
+    });
+  } catch {
+    // Status reporting is optional; the account data save remains authoritative.
+  }
+
+  state = normalizeState(merged.state);
+  localStorage.setItem(storageKey, JSON.stringify(state));
+  markLocalDirty();
+  const saved = await pushCloudState({ silent: true });
+  if (!saved) {
+    state = previousState;
+    localStorage.setItem(storageKey, JSON.stringify(state));
+    localDirty = previousDirty;
+    cloudUpdatedAt = previousUpdatedAt;
+    saveSyncMeta();
+    accountRecovery = { ...accountRecovery, saving: false, message: "保存できませんでした。元データは変更していません。" };
+    try {
+      await saveAccountRecoveryStatus({
+        status: "failed",
+        anonymous: merged.anonymous,
+        ambiguousCount: merged.ambiguous.length,
+        errorCode: cloudConflict ? "cloud_conflict" : "cloud_save_failed"
+      });
+    } catch {
+      // Keep the local recovery UI available even if status reporting fails.
+    }
+    render();
+    return;
+  }
+
+  clearAnonymousStorage(localStorage, {
+    stateBaseKey: storageBaseKey,
+    syncBaseKey: syncMetaBaseKey,
+    legacyStateKey: legacyStorageKey
+  });
+  try {
+    await saveAccountRecoveryStatus({
+      status: "resolved",
+      anonymous: merged.anonymous,
+      ambiguousCount: merged.ambiguous.length
+    });
+  } catch {
+    // The account data is already safely stored.
+  }
+  accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
+  cloudMessage = `未ログイン時の${merged.anonymous.matches}試合を統合しました`;
+  route = { name: "decks" };
+  render();
 }
 
 function loadSyncMeta() {
@@ -903,8 +1101,14 @@ function renderSummary() {
   const selectedColorMatchup = colorMatchups.find((row) => (
     `${row.myColor}:${row.opponentColor}` === route.colorMatchup
   ));
+  const repairQueue = adminPreview ? [] : buildRepairQueue(state);
 
   view.innerHTML = `
+    ${repairQueue.length ? `
+      <button class="missing-data-chip" type="button" data-open-repair>
+        <span>未記録の項目があります</span><strong>${repairQueue.length}試合</strong><b>›</b>
+      </button>
+    ` : ""}
     <div class="analysis-primary-filters">
       <label><span>デッキ</span><select data-analysis-deck-select>
         <option value="">全デッキ</option>
@@ -1003,6 +1207,50 @@ function renderSummary() {
           `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
         </div>`}
   `;
+}
+
+function renderRepair() {
+  title.textContent = adminPreview ? `${adminPreview.username}・未記録` : "未記録を補完";
+  const selectedField = qualityFields.some((field) => field.key === route.repairField)
+    ? route.repairField
+    : "";
+  const queue = buildRepairQueue(state, selectedField);
+  view.innerHTML = `
+    ${adminPreview?.recovery?.active ? adminRecoverySupportMarkup(adminPreview.recovery) : ""}
+    <section class="repair-filter">
+      <label><span>項目</span><select data-repair-field>
+        <option value="">すべての未記録</option>
+        ${qualityFields.map((field) => `<option value="${field.key}" ${selectedField === field.key ? "selected" : ""}>${field.label}</option>`).join("")}
+      </select></label>
+      <strong>${queue.length}試合</strong>
+    </section>
+    <div class="repair-list">
+      ${queue.map((item) => repairRowMarkup(item)).join("") || `
+        <div class="empty-card">${selectedField ? `${escapeHtml(qualityFieldLabel(selectedField))}の未記録はありません` : "補完が必要な試合はありません"}</div>
+      `}
+    </div>
+  `;
+}
+
+function repairRowMarkup(item) {
+  const round = matchesForSession(item.session.id).findIndex((match) => match.id === item.match.id) + 1;
+  const labels = item.missingFields.map(qualityFieldLabel);
+  return `
+    <${adminPreview ? "article" : "button"} class="repair-row" ${adminPreview ? "" : `type="button" data-repair-match="${item.match.id}"`}>
+      <span>
+        <strong>${escapeHtml(item.session.name || "大会名未設定")}</strong>
+        <small>${formatDate(item.session.date)}・第${Math.max(round, 1)}試合・${escapeHtml(item.match.opponentDeck || "相手デッキ未記録")}</small>
+      </span>
+      <span class="repair-missing">${labels.slice(0, 2).map((label) => `<i>${escapeHtml(label)}</i>`).join("")}${labels.length > 2 ? `<b>+${labels.length - 2}</b>` : ""}</span>
+      ${adminPreview ? "" : "<b>›</b>"}
+    </${adminPreview ? "article" : "button"}>
+  `;
+}
+
+function openRepairItem(item) {
+  if (!item || adminPreview) return;
+  const target = repairTargetForFields(item.missingFields, route.repairField || "");
+  openDialog(target, target === "session" ? item.session.id : item.match.id);
 }
 
 function personalColorMatchupMarkup(rows, selected, minimumColorSamples) {
@@ -1254,22 +1502,22 @@ function renderAdmin() {
     return;
   }
 
-  const dashboard = buildAdminDashboard(adminState.raw, {
-    month: route.adminMonth || "",
-    environment: route.adminEnvironment || "",
-    excludePasses: Boolean(route.adminExcludePasses),
-    consentedOnly: Boolean(route.adminConsentedOnly)
-  });
-  const selectedTab = ["environment", "matchups", "usage", "quality"].includes(route.adminTab)
+  const selectedTab = ["environment", "matchups", "usage", "quality", "users"].includes(route.adminTab)
     ? route.adminTab
     : "environment";
+  const dashboard = buildAdminDashboard(adminState.raw, {
+    month: selectedTab === "users" ? "" : route.adminMonth || "",
+    environment: selectedTab === "users" ? "" : route.adminEnvironment || "",
+    excludePasses: selectedTab === "users" ? false : Boolean(route.adminExcludePasses),
+    consentedOnly: selectedTab === "users" ? false : Boolean(route.adminConsentedOnly)
+  });
   const filterNote = selectedTab === "usage"
     ? "期間・環境は大会・試合に適用"
     : selectedTab === "quality"
       ? "選択条件を全記録に適用"
       : "勝率は完了試合のみ";
   view.innerHTML = `
-    <section class="admin-filter-bar" aria-label="管理者集計フィルター">
+    ${selectedTab === "users" ? "" : `<section class="admin-filter-bar" aria-label="管理者集計フィルター">
       <label><span>期間</span><select data-admin-month><option value="">全期間</option>${dashboard.filterOptions.months.map((month) => `<option value="${month}" ${month === dashboard.filters.month ? "selected" : ""}>${formatMonth(month)}</option>`).join("")}</select></label>
       <label><span>環境</span><select data-admin-environment><option value="">全環境</option>${dashboard.filterOptions.environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === dashboard.filters.environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
       <div class="admin-filter-toggles">
@@ -1277,17 +1525,19 @@ function renderAdmin() {
         <label><input type="checkbox" data-admin-consented-only ${route.adminConsentedOnly ? "checked" : ""}>同意者のみ</label>
         <span>${filterNote}</span>
       </div>
-    </section>
+    </section>`}
     <nav class="admin-tabs" aria-label="管理者集計">
       ${adminTabButton("environment", "環境分析", selectedTab)}
       ${adminTabButton("matchups", "対面分析", selectedTab)}
       ${adminTabButton("usage", "利用状況", selectedTab)}
       ${adminTabButton("quality", "データ品質", selectedTab)}
+      ${adminTabButton("users", "利用者", selectedTab)}
     </nav>
     ${selectedTab === "environment" ? adminEnvironmentMarkup(dashboard) : ""}
     ${selectedTab === "matchups" ? adminMatchupMarkup(dashboard) : ""}
     ${selectedTab === "usage" ? adminUsageMarkup(dashboard) : ""}
     ${selectedTab === "quality" ? adminQualityMarkup(dashboard) : ""}
+    ${selectedTab === "users" ? adminUsersMarkup(dashboard) : ""}
   `;
 }
 
@@ -1444,17 +1694,48 @@ function adminUsageMarkup(dashboard) {
       <div class="admin-activity-list">${usage.activityByMonth.slice(0, 12).map((row) => `<span><b>${formatMonth(row.month)}</b><small>${row.users}人</small><small>${row.sessions}大会</small><strong>${row.matches}戦</strong></span>`).join("") || `<p class="admin-empty-inline">利用記録がありません</p>`}</div>
     </section>
     <div class="admin-quality-note"><strong>同期日の定義</strong><span>7日・30日はクラウドデータの最終同期日時を基準にしています。</span></div>
+  `;
+}
+
+function adminUsersMarkup(dashboard) {
+  const filters = {
+    query: route.adminUserQuery || "",
+    status: ["all", "attention", "recovery", "stale", "empty"].includes(route.adminUserStatus) ? route.adminUserStatus : "all",
+    sort: ["attention", "latest", "matches", "sessions", "winRate"].includes(route.adminUserSort) ? route.adminUserSort : "attention",
+    direction: route.adminUserDirection === "asc" ? "asc" : "desc"
+  };
+  const rows = filterAdminUsers(dashboard.userRows, filters);
+  return `
+    <section class="admin-user-toolbar">
+      <label class="admin-user-search"><span>検索</span><input value="${escapeHtml(filters.query)}" placeholder="ユーザー名" autocomplete="off" data-admin-user-search></label>
+      <label><span>状態</span><select data-admin-user-status>${optionTags([
+        ["all", "すべて"],
+        ["attention", "要対応"],
+        ["recovery", "引き継ぎ"],
+        ["stale", "長期未同期"],
+        ["empty", "記録なし"]
+      ], filters.status)}</select></label>
+      <label><span>並び</span><select data-admin-user-sort>${optionTags([
+        ["attention", "要対応"],
+        ["latest", "最終同期"],
+        ["matches", "試合数"],
+        ["sessions", "大会数"],
+        ["winRate", "勝率"]
+      ], filters.sort)}</select></label>
+      <button type="button" data-admin-user-direction aria-label="昇順と降順を切り替え">${filters.direction === "asc" ? "↑" : "↓"}</button>
+      <small data-admin-user-count>${rows.length}人</small>
+    </section>
     <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
-    ${adminUserRows(dashboard.userRows)}
+    ${adminUserRows(rows)}
   `;
 }
 
 function adminUserRows(rows) {
   return `
-    <div class="admin-user-list">
+    <div class="admin-user-list" data-admin-user-results>
       ${rows.map((row) => `
         <button class="admin-user-row" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
-          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span></div>
+          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span>${adminUserStatusChips(row)}</div>
           <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
           <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
         </button>
@@ -1463,8 +1744,37 @@ function adminUserRows(rows) {
   `;
 }
 
+function updateAdminUserSearchResults(search) {
+  route = { ...route, name: "admin", adminTab: "users", adminUserQuery: search.value };
+  const dashboard = buildAdminDashboard(adminState.raw || {}, {
+    month: "",
+    environment: "",
+    excludePasses: false,
+    consentedOnly: false
+  });
+  const rows = filterAdminUsers(dashboard.userRows, {
+    query: search.value,
+    status: route.adminUserStatus || "all",
+    sort: route.adminUserSort || "attention",
+    direction: route.adminUserDirection === "asc" ? "asc" : "desc"
+  });
+  const results = view.querySelector("[data-admin-user-results]");
+  const count = view.querySelector("[data-admin-user-count]");
+  if (results) results.outerHTML = adminUserRows(rows);
+  if (count) count.textContent = `${rows.length}人`;
+}
+
+function adminUserStatusChips(row) {
+  const chips = [];
+  if (row.recovery?.active) chips.push(`<b class="support-chip recovery">引き継ぎ ${row.recovery.matches}試合</b>`);
+  if (row.stale) chips.push(`<b class="support-chip stale">長期未同期</b>`);
+  if (row.empty) chips.push(`<b class="support-chip empty">記録なし</b>`);
+  return chips.length ? `<span class="support-chip-row">${chips.join("")}</span>` : "";
+}
+
 function adminQualityMarkup(dashboard) {
   const quality = dashboard.quality;
+  const selected = quality.fields.find((row) => row.key === route.adminQualityField);
   return `
     <section class="admin-metrics" aria-label="データ品質">
       ${adminMetric("全記録", quality.totalRecords)}
@@ -1477,16 +1787,47 @@ function adminQualityMarkup(dashboard) {
     <section class="admin-panel">
       <div class="admin-panel-head"><strong>項目別の記録率</strong><span>記録済み / 全記録</span></div>
       <div class="admin-quality-list">${quality.fields.map((row) => `
-        <div>
+        <button type="button" class="${selected?.key === row.key ? "selected" : ""}" data-admin-quality-field="${row.key}">
           <span><b>${escapeHtml(row.label)}</b><small>${row.recorded}/${quality.totalRecords}・未記録 ${row.missing}</small><strong>${row.rate}%</strong></span>
           <div><i style="width:${row.rate}%"></i></div>
-        </div>
+        </button>
       `).join("")}</div>
     </section>
+    ${selected ? adminQualityUsersMarkup(selected, dashboard.userRows) : ""}
     <div class="admin-quality-note">
       <strong>集計の読み方</strong>
       <span>未確定は勝率・対面分析から除外されています。記録率が低い項目ほど、分析結果の偏りに注意が必要です。</span>
     </div>
+  `;
+}
+
+function adminQualityUsersMarkup(field, users) {
+  const usersById = new Map(users.map((user) => [user.userId, user]));
+  return `
+    <section class="admin-panel admin-quality-users">
+      <div class="admin-panel-head"><strong>${escapeHtml(field.label)}の未記録</strong><span>${field.missing}試合</span></div>
+      <div class="admin-subsection compact">
+        ${field.affectedUsers.map((item) => {
+          const user = usersById.get(item.userId);
+          return `
+            <button type="button" data-admin-quality-user="${item.userId}" data-quality-field="${field.key}">
+              <b>${escapeHtml(user?.username || "未設定")}</b><small>${item.missing}試合</small><i>›</i>
+            </button>
+          `;
+        }).join("") || `<span><b>対象なし</b></span>`}
+      </div>
+    </section>
+  `;
+}
+
+function adminRecoverySupportMarkup(recovery) {
+  return `
+    <section class="admin-recovery-support">
+      <strong>端末データの引き継ぎが完了していません</strong>
+      <span>${recovery.decks}デッキ・${recovery.sessions}大会・${recovery.matches}試合</span>
+      ${recovery.ambiguous ? `<small>重複候補 ${recovery.ambiguous}件</small>` : ""}
+      <small>本人の端末で確認が必要です</small>
+    </section>
   `;
 }
 
@@ -1513,12 +1854,12 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
-  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "admin"].includes(route.name);
+  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "admin", "recovery", "repair"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
   phoneShell.classList.toggle("admin-preview-mode", Boolean(adminPreview));
   topBar.classList.toggle("root-header", !hasBackButton);
   backButton.style.visibility = hasBackButton ? "visible" : "hidden";
-  fabButton.hidden = Boolean(adminPreview) || route.name === "summary" || route.name === "players" || route.name === "playerDetail" || route.name === "storeDetail" || route.name === "admin" || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
+  fabButton.hidden = Boolean(adminPreview) || ["summary", "players", "playerDetail", "storeDetail", "admin", "recovery", "repair"].includes(route.name) || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
@@ -1529,6 +1870,12 @@ function render() {
   if (route.name === "sessions") renderSessions();
   if (route.name === "storeDetail") renderStoreDetail(route.storeName);
   if (route.name === "admin") renderAdmin();
+  if (route.name === "recovery") renderRecovery();
+  if (route.name === "repair") renderRepair();
+  if (route.name !== "recovery") view.insertAdjacentHTML("afterbegin", recoveryNoticeMarkup());
+  if (adminPreview?.recovery?.active && route.name !== "repair") {
+    view.insertAdjacentHTML("afterbegin", adminRecoverySupportMarkup(adminPreview.recovery));
+  }
 }
 
 function rootNavName() {
@@ -1536,6 +1883,8 @@ function rootNavName() {
   if (route.name === "session") return "sessions";
   if (route.name === "playerDetail") return "players";
   if (route.name === "storeDetail") return "sessions";
+  if (route.name === "repair") return "summary";
+  if (route.name === "recovery") return "decks";
   return route.name;
 }
 
@@ -1643,8 +1992,11 @@ function openDialog(mode, targetId = null) {
     const deckId = route.deckId || activeDecks[0]?.id || "";
     const fixedDeck = !editingSession && route.name === "deckDetail" ? getDeck(route.deckId) : null;
     const selectedSessionDeckId = editingSession?.deckId || deckId;
+    const selectedSessionDeck = getDeck(selectedSessionDeckId);
     const selectedSessionVersion = editingSession?.deckVersion || getDeck(selectedSessionDeckId)?.version || "v1";
     const sessionVersions = sessionVersionOptions(state, selectedSessionDeckId, selectedSessionVersion);
+    const selectedSessionPartnerColor = editingSession?.partnerColor || selectedSessionDeck?.partnerColor || "";
+    const selectedSessionCaseCardId = editingSession?.caseCardId || selectedSessionDeck?.caseCardId || "";
     dialogFields.innerHTML = `
       ${fixedDeck ? `
         <div class="locked-field">
@@ -1663,6 +2015,19 @@ function openDialog(mode, targetId = null) {
         <label>日付<input type="date" name="date" required value="${editingSession?.date || new Date().toISOString().slice(0, 10)}"></label>
         <label>形式<select name="format">${optionTags([["BO1", "BO1"], ["BO3", "BO3"]], editingSession?.format || "BO1")}</select></label>
       </div>
+      ${editingSession ? `
+        <details class="match-extra-fields" ${route.name === "repair" ? "open" : ""}>
+          <summary>使用時の色・事件カード</summary>
+          ${partnerColorChoices("sessionPartnerColor", selectedSessionPartnerColor, "session")}
+          ${caseCardPicker({
+            inputName: "sessionCaseCardName",
+            listId: "sessionCaseCardSuggestions",
+            selectedCaseCardId: selectedSessionCaseCardId,
+            partnerColor: selectedSessionPartnerColor,
+            scope: "session"
+          })}
+        </details>
+      ` : ""}
       <details class="session-result-fields" ${editingSession?.placement || editingSession?.randomPrizeMethod ? "open" : ""}>
         <summary>大会結果・ランダム賞</summary>
         <label>大会結果<select name="placement" data-placement-select>${optionTags([["", "未記録"], ["champion", "優勝"], ["second", "2位"], ["top4", "ベスト4"], ["other", "その他"]], editingSession?.placement || "")}</select></label>
@@ -1678,10 +2043,10 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "match") {
-    dialogSubmit.hidden = false;
-    const session = getSession(route.sessionId) || state.sessions[0];
-    const deck = getDeck(session?.deckId);
     const editingMatch = editingMatchId ? state.matches.find((match) => match.id === editingMatchId) : null;
+    dialogSubmit.hidden = false;
+    const session = getSession(editingMatch?.sessionId || route.sessionId) || state.sessions[0];
+    const deck = getDeck(session?.deckId);
     dialogKicker.textContent = "Round";
     dialogTitle.textContent = editingMatch ? "勝敗を編集" : "勝敗登録";
     dialogSubmit.textContent = editingMatch ? "更新" : "保存";
@@ -1724,6 +2089,14 @@ entryForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (adminPreview) return;
   const data = new FormData(entryForm);
+  const repairContext = route.name === "repair" && ["match", "session"].includes(dialogMode)
+    ? {
+        matchId: editingMatchId,
+        sessionId: editingSessionId,
+        field: route.repairField || "",
+        route: { ...route }
+      }
+    : null;
 
   if (dialogMode === "deck") {
     const now = new Date().toISOString();
@@ -1757,13 +2130,24 @@ entryForm.addEventListener("submit", (event) => {
     const selectedDeck = getDeck(data.get("deckId"));
     const currentSession = editingSessionId ? getSession(editingSessionId) : null;
     const keepsDeckMetadata = currentSession?.deckId === data.get("deckId");
+    const sessionPartnerColor = currentSession
+      ? normalizePartnerColor(data.get("sessionPartnerColor"))
+      : selectedDeck?.partnerColor || "";
+    const sessionCaseCardId = currentSession
+      ? selectedCaseCardId("sessionCaseCardName", sessionPartnerColor)
+      : selectedDeck?.caseCardId || "";
+    if (sessionCaseCardId === null) return;
     const randomPrizeMethod = data.get("randomPrizeMethod") || "";
     const session = {
       id: editingSessionId || crypto.randomUUID(),
       deckId: data.get("deckId"),
       deckVersion: data.get("deckVersion")?.trim() || selectedDeck?.version || "v1",
-      partnerColor: keepsDeckMetadata ? currentSession.partnerColor : selectedDeck?.partnerColor || "",
-      caseCardId: keepsDeckMetadata ? currentSession.caseCardId : selectedDeck?.caseCardId || "",
+      partnerColor: currentSession
+        ? sessionPartnerColor
+        : keepsDeckMetadata ? currentSession.partnerColor : selectedDeck?.partnerColor || "",
+      caseCardId: currentSession
+        ? sessionCaseCardId
+        : keepsDeckMetadata ? currentSession.caseCardId : selectedDeck?.caseCardId || "",
       name: data.get("name").trim(),
       date: data.get("date"),
       format: data.get("format"),
@@ -1818,13 +2202,46 @@ entryForm.addEventListener("submit", (event) => {
     }
   }
 
+  if (repairContext) route = repairContext.route;
   saveState();
   dialog.close();
   entryForm.reset();
   render();
+  if (repairContext) {
+    const remaining = buildRepairQueue(state, repairContext.field);
+    const next = remaining.find((item) => (
+      item.match.id !== repairContext.matchId
+      && item.session.id !== repairContext.sessionId
+    ));
+    if (next) window.setTimeout(() => openRepairItem(next), 0);
+  }
 });
 
 view.addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-account-recovery]")) {
+    setRoute({ name: "recovery" });
+    saveAccountRecoveryStatus({
+      status: "reviewing",
+      anonymous: accountRecovery.preview?.anonymous,
+      ambiguousCount: accountRecovery.preview?.ambiguous.length || 0
+    }).catch(() => {});
+    return;
+  }
+  if (event.target.closest("[data-download-recovery-backup]")) {
+    saveRecoveryBackup();
+    accountRecovery = { ...accountRecovery, message: "統合前JSONを保存しました" };
+    render();
+    return;
+  }
+  if (event.target.closest("[data-confirm-account-recovery]")) {
+    confirmAccountRecovery();
+    return;
+  }
+  if (event.target.closest("[data-open-repair]")) {
+    if (dialog.open) dialog.close();
+    setRoute({ name: "repair", repairField: "" });
+    return;
+  }
   const pendingMatchButton = event.target.closest("[data-open-pending-match]");
   if (pendingMatchButton) {
     event.preventDefault();
@@ -1842,7 +2259,13 @@ view.addEventListener("click", (event) => {
   }
   const adminTabButton = event.target.closest("[data-admin-tab]");
   if (adminTabButton) {
-    setRoute({ ...route, name: "admin", adminTab: adminTabButton.dataset.adminTab, adminMatchup: "" });
+    setRoute({
+      ...route,
+      name: "admin",
+      adminTab: adminTabButton.dataset.adminTab,
+      adminMatchup: "",
+      adminQualityField: ""
+    });
     return;
   }
   const adminMatchupButton = event.target.closest("[data-admin-matchup]");
@@ -1857,6 +2280,35 @@ view.addEventListener("click", (event) => {
   const adminUserButton = event.target.closest("[data-open-admin-user]");
   if (adminUserButton) {
     openAdminUserPreview(adminUserButton.dataset.openAdminUser);
+    return;
+  }
+  const adminQualityField = event.target.closest("[data-admin-quality-field]");
+  if (adminQualityField) {
+    setRoute({ ...route, name: "admin", adminTab: "quality", adminQualityField: adminQualityField.dataset.adminQualityField });
+    return;
+  }
+  const adminQualityUser = event.target.closest("[data-admin-quality-user]");
+  if (adminQualityUser) {
+    openAdminUserPreview(adminQualityUser.dataset.adminQualityUser, {
+      name: "repair",
+      repairField: adminQualityUser.dataset.qualityField || ""
+    });
+    return;
+  }
+  const repairButton = event.target.closest("[data-repair-match]");
+  if (repairButton) {
+    const item = buildRepairQueue(state, route.repairField || "")
+      .find((entry) => entry.match.id === repairButton.dataset.repairMatch);
+    openRepairItem(item);
+    return;
+  }
+  if (event.target.closest("[data-admin-user-direction]")) {
+    setRoute({
+      ...route,
+      name: "admin",
+      adminTab: "users",
+      adminUserDirection: route.adminUserDirection === "asc" ? "desc" : "asc"
+    });
     return;
   }
   if (event.target.closest("[data-copy-ai-dataset]")) {
@@ -1902,6 +2354,12 @@ view.addEventListener("change", (event) => {
   if (adminExcludePasses) setRoute({ ...route, name: "admin", adminExcludePasses: adminExcludePasses.checked, adminMatchup: "" });
   const adminConsentedOnly = event.target.closest("[data-admin-consented-only]");
   if (adminConsentedOnly) setRoute({ ...route, name: "admin", adminConsentedOnly: adminConsentedOnly.checked, adminMatchup: "" });
+  const adminUserStatus = event.target.closest("[data-admin-user-status]");
+  if (adminUserStatus) setRoute({ ...route, name: "admin", adminTab: "users", adminUserStatus: adminUserStatus.value });
+  const adminUserSort = event.target.closest("[data-admin-user-sort]");
+  if (adminUserSort) setRoute({ ...route, name: "admin", adminTab: "users", adminUserSort: adminUserSort.value });
+  const repairField = event.target.closest("[data-repair-field]");
+  if (repairField) setRoute({ ...route, name: "repair", repairField: repairField.value });
   const sortSelect = event.target.closest("[data-analysis-sort]");
   if (sortSelect) setRoute(analysisRoute({ sort: sortSelect.value }));
   const deckSelect = event.target.closest("[data-analysis-deck-select]");
@@ -1946,13 +2404,16 @@ function updatePlayerSearchResults(search) {
 
 view.addEventListener("input", (event) => {
   const search = event.target.closest("[data-player-search]");
-  if (!search || !shouldUpdateSearchFromInput(event)) return;
-  updatePlayerSearchResults(search);
+  if (search && shouldUpdateSearchFromInput(event)) updatePlayerSearchResults(search);
+  const adminSearch = event.target.closest("[data-admin-user-search]");
+  if (adminSearch && shouldUpdateSearchFromInput(event)) updateAdminUserSearchResults(adminSearch);
 });
 
 view.addEventListener("compositionend", (event) => {
   const search = event.target.closest("[data-player-search]");
   if (search) updatePlayerSearchResults(search);
+  const adminSearch = event.target.closest("[data-admin-user-search]");
+  if (adminSearch) updateAdminUserSearchResults(adminSearch);
 });
 
 dialogFields.addEventListener("change", (event) => {
@@ -2206,6 +2667,7 @@ dialogFields.addEventListener("click", (event) => {
       .then((nextStatus) => {
         cloudStatus = nextStatus;
         activateAnonymousLocalState();
+        accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
         accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
         adminState = { loading: false, error: "", data: null, raw: null };
         cloudMessage = "ログアウトしました";
@@ -2454,7 +2916,7 @@ fabButton.addEventListener("click", () => {
 });
 
 backButton.addEventListener("click", () => {
-  if (adminPreview && ["decks", "summary", "players", "sessions"].includes(route.name)) {
+  if (adminPreview && ["decks", "summary", "players", "sessions", "repair"].includes(route.name)) {
     closeAdminUserPreview();
     return;
   }
@@ -2466,6 +2928,8 @@ backButton.addEventListener("click", () => {
   }
   if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "" });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
+  if (route.name === "repair") setRoute({ name: "summary" });
+  if (route.name === "recovery") setRoute({ name: "decks" });
   if (route.name === "admin") setRoute({ name: "decks" });
 });
 
@@ -2726,6 +3190,8 @@ async function refreshCloudSession() {
       }
       if (accountContext.role === "superadmin") await refreshEnvironmentCatalog(true);
       await pullCloudState({ uploadWhenEmpty: true, silent: true });
+      await refreshAccountRecovery();
+      render();
       if (accountContext.schemaReady && !accountContext.termsAccepted) {
         cloudMessage = "ユーザー名と規約同意を登録してください";
         openDialog("cloudSettings");
@@ -2751,9 +3217,17 @@ async function loadAdminDashboard() {
   if (route.name === "admin") render();
 }
 
-async function openAdminUserPreview(userId) {
+async function openAdminUserPreview(userId, destination = { name: "decks" }) {
   if (accountContext.role !== "superadmin" || adminPreview) return;
-  const user = adminState.data?.userRows.find((row) => row.userId === userId);
+  const usersTab = route.adminTab === "users";
+  const dashboard = buildAdminDashboard(adminState.raw || {}, {
+    month: usersTab ? "" : route.adminMonth || "",
+    environment: usersTab ? "" : route.adminEnvironment || "",
+    excludePasses: usersTab ? false : Boolean(route.adminExcludePasses),
+    consentedOnly: usersTab ? false : Boolean(route.adminConsentedOnly)
+  });
+  const user = dashboard.userRows.find((row) => row.userId === userId)
+    || adminState.data?.userRows.find((row) => row.userId === userId);
   if (!user) return;
   adminState = { ...adminState, previewLoadingUserId: userId };
   render();
@@ -2761,8 +3235,9 @@ async function openAdminUserPreview(userId) {
     window.clearTimeout(cloudSaveTimer);
     const remote = await loadAdminUserState(userId);
     adminPreview = beginAdminPreview(state, user, remote);
+    adminPreview.recovery = user.recovery || null;
     state = normalizeState(adminPreview.viewedState);
-    route = { name: "decks" };
+    route = destination;
     dialog.close();
     render();
   } catch (error) {
@@ -2860,11 +3335,13 @@ async function pushCloudState(options = {}) {
     }
     cloudMessage = localDirty ? "続きの変更をクラウド保存待ち" : `クラウド保存済み ${formatSyncTime(updatedAt)}`;
     rerenderOpenMenu();
+    return true;
   } catch (error) {
     if (requestEpoch !== storageEpoch) return;
     cloudConflict = error.code === "CLOUD_CONFLICT";
     cloudMessage = `クラウド保存失敗: ${error.message}`;
     rerenderOpenMenu();
+    return false;
   }
 }
 
@@ -3095,7 +3572,18 @@ function menuRowsMarkup() {
 
 function dataSettingsMarkup() {
   const stores = uniqueValues(state.sessions.map((session) => session.name));
+  const repairCount = buildRepairQueue(state).length;
   return `
+    ${accountRecovery.preview ? `
+      <button class="data-action-row recovery" type="button" data-open-account-recovery>
+        <span><strong>端末内の未ログインデータ</strong><small>${accountRecovery.preview.anonymous.matches}試合が見つかっています</small></span><b>内容を確認</b>
+      </button>
+    ` : ""}
+    ${repairCount ? `
+      <button class="data-action-row" type="button" data-open-repair>
+        <span><strong>未記録の項目を補完</strong><small>${repairCount}試合に未記録があります</small></span><b>開く</b>
+      </button>
+    ` : ""}
     ${environmentMasterMarkup()}
     ${dataSettingsMessage ? `<p class="cloud-message data-settings-message" role="status">${escapeHtml(dataSettingsMessage)}</p>` : ""}
     <details class="import-panel">

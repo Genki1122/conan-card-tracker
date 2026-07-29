@@ -10,26 +10,35 @@ export function activateAnonymousStorage({ stateBaseKey, syncBaseKey }) {
   };
 }
 
+export function readAnonymousStorage(storage, { stateBaseKey }) {
+  return readAnonymousStorageSources(storage, { stateBaseKey })[0]?.state || null;
+}
+
+export function readAnonymousStorageSources(storage, { stateBaseKey }) {
+  const keys = [scopedStorageKey(stateBaseKey), stateBaseKey];
+  return keys.flatMap((key) => {
+    const value = storage.getItem(key);
+    if (!value) return [];
+    try {
+      return [{ key, state: JSON.parse(value) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export function clearAnonymousStorage(storage, { stateBaseKey, syncBaseKey, legacyStateKey = "" }) {
+  [
+    scopedStorageKey(stateBaseKey),
+    scopedStorageKey(syncBaseKey),
+    stateBaseKey,
+    syncBaseKey,
+    legacyStateKey
+  ].filter(Boolean).forEach((key) => storage.removeItem(key));
+}
+
 export function activateUserStorage(storage, { stateBaseKey, syncBaseKey, userId }) {
   const stateKey = scopedStorageKey(stateBaseKey, userId);
   const syncKey = scopedStorageKey(syncBaseKey, userId);
-  if (storage.getItem(stateKey)) return { stateKey, syncKey, migrated: false };
-
-  const anonymous = activateAnonymousStorage({ stateBaseKey, syncBaseKey });
-  const sourceStateKey = storage.getItem(anonymous.stateKey)
-    ? anonymous.stateKey
-    : storage.getItem(stateBaseKey)
-      ? stateBaseKey
-      : "";
-  if (!sourceStateKey) return { stateKey, syncKey, migrated: false };
-
-  const sourceSyncKey = sourceStateKey === stateBaseKey ? syncBaseKey : anonymous.syncKey;
-  storage.setItem(stateKey, storage.getItem(sourceStateKey));
-  const syncValue = storage.getItem(sourceSyncKey);
-  if (syncValue) storage.setItem(syncKey, syncValue);
-  storage.removeItem(sourceStateKey);
-  storage.removeItem(sourceSyncKey);
-  storage.removeItem(stateBaseKey);
-  storage.removeItem(syncBaseKey);
-  return { stateKey, syncKey, migrated: true };
+  return { stateKey, syncKey, migrated: false };
 }

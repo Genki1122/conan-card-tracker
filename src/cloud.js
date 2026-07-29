@@ -158,20 +158,46 @@ export async function deleteEnvironmentCatalogItem(name) {
   if (error) throw error;
 }
 
+export async function saveAccountRecoveryStatus({
+  status,
+  anonymous = {},
+  ambiguousCount = 0,
+  errorCode = ""
+}) {
+  const supabase = await getClient();
+  const userId = requireUserId();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("account_recovery_status").upsert({
+    user_id: userId,
+    status,
+    anonymous_decks: Number(anonymous.decks || 0),
+    anonymous_sessions: Number(anonymous.sessions || 0),
+    anonymous_matches: Number(anonymous.matches || 0),
+    ambiguous_count: Number(ambiguousCount || 0),
+    error_code: String(errorCode || "").slice(0, 80),
+    resolved_at: status === "resolved" ? now : null,
+    updated_at: now
+  }, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
 export async function loadAdminData() {
   const supabase = await getClient();
   requireUserId();
-  const [profilesResult, consentsResult, statesResult] = await Promise.all([
+  const [profilesResult, consentsResult, statesResult, recoveryResult] = await Promise.all([
     supabase.from("profiles").select("user_id, username, created_at, updated_at"),
     supabase.from("account_consents").select("user_id, terms_version, accepted_at, ai_training_included"),
-    supabase.rpc("get_admin_app_states")
+    supabase.rpc("get_admin_app_states"),
+    supabase.rpc("get_admin_recovery_statuses")
   ]);
-  const error = profilesResult.error || consentsResult.error || statesResult.error;
+  const recoveryMissing = recoveryResult.error && isMissingRecoverySchema(recoveryResult.error);
+  const error = profilesResult.error || consentsResult.error || statesResult.error || (recoveryMissing ? null : recoveryResult.error);
   if (error) throw error;
   return {
     profiles: profilesResult.data || [],
     consents: consentsResult.data || [],
-    states: statesResult.data || []
+    states: statesResult.data || [],
+    recoveries: recoveryMissing ? [] : recoveryResult.data || []
   };
 }
 
@@ -283,4 +309,12 @@ function cloudConflictError() {
   const error = new Error("別の端末で新しいデータが保存されています");
   error.code = "CLOUD_CONFLICT";
   return error;
+}
+
+function isMissingRecoverySchema(error) {
+  const message = String(error?.message || "");
+  return error?.code === "PGRST202"
+    || error?.code === "42P01"
+    || message.includes("get_admin_recovery_statuses")
+    || message.includes("account_recovery_status");
 }
