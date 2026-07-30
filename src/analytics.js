@@ -90,6 +90,16 @@ export function isPassRecorded(value) {
   return !["none", false, "false", undefined, null, ""].includes(value);
 }
 
+export function getMyPassUsage(matches = []) {
+  const completed = completedMatches(matches);
+  const used = completed.filter((match) => isPassRecorded(match.myPassed)).length;
+  return {
+    used,
+    total: completed.length,
+    rate: rate(used, completed.length)
+  };
+}
+
 export function filterMatchesWithoutPasses(matches = []) {
   return matches.filter((match) => !isPassRecorded(match.myPassed) && !isPassRecorded(match.opponentPassed));
 }

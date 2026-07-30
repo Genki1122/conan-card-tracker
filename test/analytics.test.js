@@ -11,6 +11,7 @@ import {
   formatRecordSummaryWithRate,
   formatRecordDate,
   getDeckBreakdown,
+  getMyPassUsage,
   getOpponentBreakdown,
   getOpponentTurnBreakdown,
   getAnalysisInsights,
@@ -227,6 +228,20 @@ describe("pass exclusion analysis", () => {
       filterMatchesWithoutPasses(passMatches).map((match) => match.id),
       ["none", "legacy-none"]
     );
+  });
+
+  it("calculates the user's pass rate from completed matches only", () => {
+    assert.deepEqual(getMyPassUsage([
+      { result: "win", myPassed: "none" },
+      { result: "loss", myPassed: "pass1" },
+      { result: "draw", myPassed: true },
+      { result: "win", myPassed: false },
+      { result: "pending", myPassed: "pass2" }
+    ]), {
+      used: 2,
+      total: 4,
+      rate: 50
+    });
   });
 });
 

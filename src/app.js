@@ -10,6 +10,7 @@ import {
   formatRecordSummaryWithRate,
   getColorMatchups,
   getCrossBreakdown,
+  getMyPassUsage,
   getPlayerDeckOverviews,
   getPlayerOverviews,
   getPlayerRecord,
@@ -947,12 +948,15 @@ function summaryCard(summary, meta, compact = false) {
   `;
 }
 
-function recordStrip(summary, meta = [], badge = "") {
+function recordStrip(summary, meta = [], badge = "", extraMetric = null) {
   return `
-    <section class="record-strip">
+    <section class="record-strip ${extraMetric ? "with-extra-metric" : ""}">
       <div><span>戦績</span><strong>${recordText(summary)}</strong></div>
       <div><span>勝率</span><strong>${summary.winRate || 0}%</strong></div>
-      <p>${meta.map((item) => `<span>${item}</span>`).join("")}</p>
+      ${extraMetric ? `<div><span>${escapeHtml(extraMetric.label)}</span><strong>${escapeHtml(extraMetric.value)}</strong></div>` : ""}
+      <p>${extraMetric && meta.length > 1
+        ? `<span>${meta[0]}</span><span class="record-strip-counts">${meta.slice(1).map((item) => `<b>${item}</b>`).join("")}</span>`
+        : meta.map((item) => `<span>${item}</span>`).join("")}</p>
       ${badge ? `<i>${escapeHtml(badge)}</i>` : ""}
     </section>
   `;
@@ -996,11 +1000,18 @@ function renderDeckDetail(deckId) {
   const deck = getDeck(deckId);
   if (!deck) return setRoute({ name: "decks" });
   const deckSessions = sessionsForDeck(deckId).sort((a, b) => b.date.localeCompare(a.date));
-  const summary = summarizeMatches(matchesForDeck(deckId));
+  const deckMatches = matchesForDeck(deckId);
+  const summary = summarizeMatches(deckMatches);
+  const passUsage = getMyPassUsage(deckMatches);
 
   title.textContent = deck.name;
   view.innerHTML = `
-    ${recordStrip(summary, [escapeHtml(deck.version || "v1"), `${deckSessions.length}大会`, `${summary.total}試合`], deck.archived ? "アーカイブ" : "")}
+    ${recordStrip(
+      summary,
+      [escapeHtml(deck.version || "v1"), `${deckSessions.length}大会`, `${summary.total}試合`],
+      deck.archived ? "アーカイブ" : "",
+      { label: "パス率", value: formatPercentage(passUsage.rate) }
+    )}
     <div class="list-stack compact-session-list">
       ${deckSessions.map((session) => {
         const count = matchesForSession(session.id).length;
