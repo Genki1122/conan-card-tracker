@@ -17,6 +17,7 @@ import {
   getColorMatchups,
   getCrossBreakdown,
   getPlayerBreakdown,
+  getPlayerDeckOverviews,
   getPlayerOverviews,
   getPlayerOverviewsByMonth,
   getPlayerRecord,
@@ -339,6 +340,68 @@ describe("player quick lookup analytics", () => {
       { name: "佐藤さん", total: 2, latestDate: "2026-07-20", latestDeck: "長野", latestStore: "店舗B" },
       { name: "田中さん", total: 1, latestDate: "2026-07-10", latestDeck: "王冠", latestStore: "店舗C" }
     ]);
+  });
+
+  it("includes a known player whose only match is still pending", () => {
+    const rows = getPlayerOverviews([
+      {
+        id: "pending-1",
+        opponentPlayer: "対戦中さん",
+        opponentDeck: "疾風",
+        opponentRps: "scissors",
+        result: "pending",
+        date: "2026-07-30",
+        store: "店舗A"
+      }
+    ]);
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, "対戦中さん");
+    assert.equal(rows[0].total, 0);
+    assert.equal(rows[0].latestMatch.opponentDeck, "疾風");
+    assert.equal(rows[0].recordedRps.total, 1);
+  });
+
+  it("sorts opponent decks by latest use and exposes the latest color and case card", () => {
+    const rows = getPlayerDeckOverviews([
+      {
+        id: "m1",
+        opponentDeck: "白黄前髪",
+        opponentPartnerColor: "white",
+        opponentCaseCard: "怪盗キッドと四名画",
+        result: "win",
+        date: "2026-07-01"
+      },
+      {
+        id: "m2",
+        opponentDeck: "疾風",
+        opponentPartnerColor: "yellow",
+        opponentCaseCard: "風の女神",
+        result: "loss",
+        date: "2026-07-20"
+      },
+      {
+        id: "m3",
+        opponentDeck: "白黄前髪",
+        opponentPartnerColor: "yellow",
+        opponentCaseCard: "キッドvs安室 王妃の前髪",
+        result: "pending",
+        date: "2026-07-30"
+      }
+    ]);
+
+    assert.deepEqual(rows.map((row) => row.name), ["白黄前髪", "疾風"]);
+    assert.deepEqual({
+      total: rows[0].total,
+      wins: rows[0].wins,
+      latestColor: rows[0].latestMatch.opponentPartnerColor,
+      latestCaseCard: rows[0].latestMatch.opponentCaseCard
+    }, {
+      total: 1,
+      wins: 1,
+      latestColor: "yellow",
+      latestCaseCard: "キッドvs安室 王妃の前髪"
+    });
   });
 
   it("calculates hand tendency using only recorded RPS matches", () => {

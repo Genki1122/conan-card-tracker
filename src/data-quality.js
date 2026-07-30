@@ -76,7 +76,7 @@ function isRecorded(key, record) {
   if (key === "opponentPlayer") {
     return typeof record.opponentPlayerRecorded === "boolean"
       ? record.opponentPlayerRecorded
-      : knownValue(record.opponentPlayer, ["不明", "未登録"]);
+      : knownValue(record.opponentPlayer, ["未登録"]);
   }
   if (key === "opponentDeck") return knownValue(record.opponentDeck, ["不明", "未設定"]);
   if (key === "myColor") return knownValue(record.myPartnerColor);

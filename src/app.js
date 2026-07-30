@@ -10,6 +10,7 @@ import {
   formatRecordSummaryWithRate,
   getColorMatchups,
   getCrossBreakdown,
+  getPlayerDeckOverviews,
   getPlayerOverviews,
   getPlayerRecord,
   getRecordedRpsBreakdown,
@@ -1327,18 +1328,37 @@ function renderPlayers() {
     const enriched = [...record.matches].sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
     const rps = getRecordedRpsBreakdown(enriched);
     const latest = enriched[0];
-    const recentDecks = uniqueValues(enriched.map((match) => match.opponentDeck)).slice(0, 3);
-    const deckRows = getCrossBreakdown(enriched, "opponentDeck");
+    const pendingCount = enriched.length - record.total;
+    const recordCountLabel = `${record.total ? `${record.total}戦` : ""}${pendingCount ? `${record.total ? "・" : ""}未確定${pendingCount}件` : ""}`;
+    const deckRows = getPlayerDeckOverviews(enriched);
     view.innerHTML = `
-      <div class="player-detail-period"><span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}</span><strong>${record.total}戦</strong></div>
-      ${summaryCard(record, [`最終 ${formatDate(latest?.date)}`, `${record.total}戦`], true)}
-      ${adminPreview ? "" : `<div class="player-detail-actions"><button type="button" data-rename-player="${escapeHtml(selected)}">名前を変更</button></div>`}
+      <div class="player-detail-period">
+        <span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}</span>
+        <span class="player-detail-period-actions">
+          <strong>${recordCountLabel}</strong>
+          ${adminPreview ? "" : `<button type="button" data-rename-player="${escapeHtml(selected)}" aria-label="名前を変更" title="名前を変更">✎</button>`}
+        </span>
+      </div>
+      ${record.total
+        ? summaryCard(record, [`最終 ${formatDate(latest?.date)}`], true)
+        : `<article class="player-pending-summary"><strong>勝敗未確定</strong><span>先後・じゃんけん・デッキ情報を確認できます</span></article>`}
       <section class="player-first-look">
         <div><strong>じゃんけん傾向</strong>${playerRpsMarkup(rps)}</div>
-        <div class="recent-player-decks"><strong>最近の相手デッキ</strong><span>${recentDecks.map((name) => `<i>${escapeHtml(name)}</i>`).join("") || "記録なし"}</span></div>
       </section>
       <h2 class="section-title">相手デッキ別</h2>
-      <div class="player-deck-breakdown">${deckRows.map((row) => `<div><strong>${escapeHtml(row.name)}</strong><span>${row.wins}-${row.losses} / ${row.winRate}%</span></div>`).join("") || `<div><strong>記録なし</strong><span>期間または環境を変更してください</span></div>`}</div>
+      <div class="player-deck-breakdown">${deckRows.map((row, index) => `
+        <details class="player-deck-card">
+          <summary>
+            <strong>${playerColorDotMarkup(row.latestMatch?.opponentPartnerColor)}${escapeHtml(row.name)}${index === 0 ? `<em>最新</em>` : ""}</strong>
+            <span>${row.total ? formatRecordSummaryWithRate(row) : "勝敗未確定"}</span>
+          </summary>
+          <div class="player-deck-meta">
+            <span>最終 ${formatDate(row.latestMatch?.date)}</span>
+            <span>色 ${escapeHtml(partnerColorLabel(row.latestMatch?.opponentPartnerColor))}</span>
+            <span>事件 ${escapeHtml(row.latestMatch?.opponentCaseCard || "未記録")}</span>
+          </div>
+        </details>
+      `).join("") || `<div class="player-deck-empty"><strong>記録なし</strong><span>期間または環境を変更してください</span></div>`}</div>
       <h2 class="section-title">${escapeHtml(selected)}との履歴</h2>
       <div class="list-stack player-history-list">
         ${enriched.map((match) => {
@@ -1346,7 +1366,7 @@ function renderPlayers() {
           return `
             <${adminPreview ? "article" : "button"} class="player-history-card" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
               <span class="player-history-copy">
-                <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${escapeHtml(match.opponentDeck)}</strong>
+                <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${playerColorDotMarkup(match.opponentPartnerColor)}${escapeHtml(match.opponentDeck)}</strong>
                 <span>${escapeHtml(session?.name || "")}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
               </span>
               <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
@@ -1380,16 +1400,27 @@ function renderPlayers() {
 }
 
 function playerRowsMarkup(rows, query, hasContextFilter) {
-  return rows.map((row) => `
-    <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
-      <span class="player-list-copy">
-        <strong>${escapeHtml(row.name)}</strong>
-        <span>最終 ${formatDate(row.latestMatch?.date)}・${escapeHtml(row.latestMatch?.opponentDeck || "デッキ不明")}・${escapeHtml(row.latestMatch?.store || "場所不明")}</span>
-        ${query ? playerRpsMarkup(row.recordedRps, true) : ""}
-      </span>
-      <span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>
-    </button>
-  `).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : hasContextFilter ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`;
+  return rows.map((row) => {
+    const score = row.total
+      ? `<span class="score-pill ${playerWinRateTone(row.winRate)}">${row.winRate}%<small>${row.wins}-${row.losses} / ${row.total}戦</small></span>`
+      : `<span class="score-pill pending">未確定<small>結果待ち</small></span>`;
+    return `
+      <button class="player-list-card ${query ? "search-result" : ""}" type="button" data-open-player="${escapeHtml(row.name)}">
+        <span class="player-list-copy">
+          <strong>${escapeHtml(row.name)}</strong>
+          <span>最終 ${formatDate(row.latestMatch?.date)}・<i class="player-latest-deck">${playerColorDotMarkup(row.latestMatch?.opponentPartnerColor)}${escapeHtml(row.latestMatch?.opponentDeck || "デッキ不明")}</i>・${escapeHtml(row.latestMatch?.store || "場所不明")}</span>
+          ${query ? playerRpsMarkup(row.recordedRps, true) : ""}
+        </span>
+        ${score}
+      </button>
+    `;
+  }).join("") || `<div class="empty-card">${query ? "該当するプレイヤーがいません" : hasContextFilter ? "この条件のプレイヤー記録はありません" : "試合記録に相手プレイヤー名を入れると、ここに履歴が出ます"}</div>`;
+}
+
+function playerColorDotMarkup(color) {
+  const normalized = normalizePartnerColor(color);
+  if (!normalized) return "";
+  return `<i class="player-color-dot ${normalized}" aria-label="${escapeHtml(partnerColorLabel(normalized))}" title="${escapeHtml(partnerColorLabel(normalized))}"></i>`;
 }
 
 function analysisRowName(name, pivot) {

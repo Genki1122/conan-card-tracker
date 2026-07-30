@@ -21,7 +21,6 @@ test("finds missing match and session fields with shared definitions", () => {
   );
 
   assert.deepEqual(missing, [
-    "opponentPlayer",
     "opponentColor",
     "opponentCaseCard",
     "environment"
@@ -41,8 +40,20 @@ test("builds a newest-first repair queue and filters by one field", () => {
     ]
   };
 
-  assert.deepEqual(buildRepairQueue(state).map((item) => item.match.id), ["m2", "m1"]);
+  assert.deepEqual(buildRepairQueue(state).map((item) => item.match.id), ["m1"]);
   assert.deepEqual(buildRepairQueue(state, "opponentColor").map((item) => item.match.id), ["m1"]);
+  assert.deepEqual(buildRepairQueue(state, "opponentPlayer"), []);
+});
+
+test("treats an explicitly unknown player as completed input", () => {
+  assert.equal(
+    missingQualityFields({ opponentPlayer: "不明" }, {}, {}).includes("opponentPlayer"),
+    false
+  );
+  assert.equal(
+    missingQualityFields({ opponentPlayer: "" }, {}, {}).includes("opponentPlayer"),
+    true
+  );
 });
 
 test("quality rows expose affected users without identities from match content", () => {

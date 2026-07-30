@@ -300,18 +300,54 @@ export function getPlayerBreakdown(matches = []) {
 }
 
 export function getPlayerOverviews(matches = []) {
-  return getPlayerBreakdown(matches).map((row) => {
-    const playerMatches = matches.filter((match) => String(match.opponentPlayer || "").trim() === row.name);
+  const names = [...new Set(matches
+    .map((match) => String(match.opponentPlayer || "").trim())
+    .filter(isKnownPlayerName))];
+  return names.map((name) => {
+    const playerMatches = matches.filter((match) => String(match.opponentPlayer || "").trim() === name);
+    const summary = summarizeMatches(playerMatches);
     const latestMatch = [...playerMatches].sort((a, b) => (
       String(b.date || "").localeCompare(String(a.date || ""))
       || String(b.id || "").localeCompare(String(a.id || ""))
     ))[0] || null;
     return {
-      ...row,
+      name,
+      total: summary.total,
+      wins: summary.wins,
+      losses: summary.losses,
+      draws: summary.draws,
+      winRate: summary.winRate,
       latestMatch,
       recordedRps: getRecordedRpsBreakdown(playerMatches)
     };
   });
+}
+
+export function getPlayerDeckOverviews(matches = []) {
+  const names = [...new Set(matches.map((match) => groupName(match, "opponentDeck")))];
+  return names
+    .map((name) => {
+      const deckMatches = matches.filter((match) => groupName(match, "opponentDeck") === name);
+      const summary = summarizeMatches(deckMatches);
+      const latestMatch = [...deckMatches].sort((a, b) => (
+        String(b.date || "").localeCompare(String(a.date || ""))
+        || String(b.id || "").localeCompare(String(a.id || ""))
+      ))[0] || null;
+      return {
+        name,
+        total: summary.total,
+        wins: summary.wins,
+        losses: summary.losses,
+        draws: summary.draws,
+        winRate: summary.winRate,
+        latestMatch
+      };
+    })
+    .sort((a, b) => (
+      String(b.latestMatch?.date || "").localeCompare(String(a.latestMatch?.date || ""))
+      || String(b.latestMatch?.id || "").localeCompare(String(a.latestMatch?.id || ""))
+      || a.name.localeCompare(b.name, "ja")
+    ));
 }
 
 export function getPlayerOverviewsByMonth(matches = [], month = "") {
