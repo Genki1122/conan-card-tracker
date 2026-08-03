@@ -1,4 +1,4 @@
-const CACHE_NAME = "conan-card-tracker-v39";
+const CACHE_NAME = "conan-card-tracker-v40";
 const ASSETS = [
   "./",
   "./index.html",
@@ -27,7 +27,9 @@ const ASSETS = [
   "./src/cloud.js",
   "./src/supabase-config.js?v=2",
   "./manifest.webmanifest",
-  "./icon.svg"
+  "./icon-192.png",
+  "./icon-512.png",
+  "./apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (event) => {
