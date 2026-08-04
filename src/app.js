@@ -3143,9 +3143,7 @@ function updateCaseCardPicker(scope, partnerColor) {
   selection.classList.toggle("is-placeholder", !currentCard);
   if (!color || candidates.length === 0) {
     if (caseCardDialog.open && activeCaseCardScope === scope) closeCaseCardDialog();
-    return;
   }
-  openCaseCardDialog(scope);
 }
 
 function activeCaseCardColor() {
@@ -3162,7 +3160,8 @@ function openCaseCardDialog(scope) {
   if (!picker || !color) return;
   activeCaseCardScope = scope;
   caseCardSearch.value = "";
-  caseCardDialogKicker.textContent = `${partnerColorLabel(color)}パートナー`;
+  caseCardDialogKicker.textContent = partnerColorLabel(color);
+  caseCardClear.hidden = !dialogFields.querySelector(`[data-case-card-input="${scope}"]`)?.value;
   renderCaseCardDialogOptions();
   if (!caseCardDialog.open) caseCardDialog.showModal();
 }

@@ -3073,6 +3073,9 @@ button.pending-match-chip {
   background: #17141d;
   color: var(--text);
   text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
 }
 
 .case-card-trigger span {
@@ -3115,50 +3118,81 @@ button.pending-match-chip {
 }
 
 .case-card-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.42);
 }
 
 .case-card-dialog-inner {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 12px;
-  height: min(72vh, 620px);
-  height: min(72dvh, 620px);
-  padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  height: min(62vh, 560px);
+  height: min(62dvh, 560px);
+  padding: 12px 14px max(12px, env(safe-area-inset-bottom));
 }
 
 .case-card-dialog-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  min-height: 42px;
+  gap: 8px;
 }
 
-.case-card-dialog-head p,
 .case-card-dialog-head h2 {
   margin: 0;
 }
 
-.case-card-dialog-head p {
-  margin-bottom: 2px;
-  color: var(--purple);
-  font-size: 0.72rem;
-  font-weight: 900;
+.case-card-dialog-head h2 {
+  min-width: 0;
+  font-size: 1rem;
+  white-space: nowrap;
 }
 
-.case-card-dialog-head h2 {
-  font-size: 1.08rem;
+.case-card-dialog-head h2 span {
+  display: inline-block;
+  margin-left: 5px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(157, 123, 255, 0.16);
+  color: var(--purple);
+  font-size: 0.66rem;
+  vertical-align: 2px;
+}
+
+.case-card-dialog-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.case-card-dialog-actions .icon-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 1.8rem;
 }
 
 .case-card-search-label {
-  gap: 5px;
-  font-size: 0.72rem;
+  position: relative;
+  display: block;
+}
+
+.case-card-search-label > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .case-card-search-label input {
-  min-height: 42px;
+  min-height: 40px;
   border-radius: 12px;
-  padding-block: 8px;
+  padding-block: 7px;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .case-card-options {
@@ -3174,13 +3208,16 @@ button.pending-match-chip {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  min-height: 50px;
+  min-height: 48px;
   border: 0;
   border-bottom: 1px solid var(--line);
   padding: 8px 4px;
   background: transparent;
   color: var(--text);
   text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
 }
 
 .case-card-option:last-child {
@@ -3217,12 +3254,21 @@ button.pending-match-chip {
 }
 
 .case-card-clear {
-  min-height: 42px;
+  min-height: 32px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #17141d;
+  border-radius: 9px;
+  padding: 4px 8px;
+  background: transparent;
   color: var(--muted);
+  font-size: 0.68rem;
   font-weight: 900;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
+}
+
+.case-card-clear[hidden] {
+  display: none;
 }
 
 .case-card-empty {
