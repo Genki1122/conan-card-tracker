@@ -68,14 +68,21 @@ test("stores shared case cards once while exposing them to both partner colors",
   });
 });
 
-test("ranks frequently selected case cards higher within the same color group", () => {
-  const cards = caseCardsForPartnerColor("blue", {
-    "pro-soccer-player-threat": 5,
-    "diplomat-murder": 20
+test("ranks case cards only by usage regardless of color combination", () => {
+  const cards = caseCardsForPartnerColor("yellow", {
+    "captured-detective": 1,
+    "pasture-embers": 7,
+    "gathered-detectives": 12
   });
   const names = cards.map((card) => card.name);
 
-  assert.ok(names.indexOf("プロサッカー選手脅迫事件") < names.indexOf("平成のホームズ"));
-  assert.ok(names.indexOf("外交官殺人事件") < names.indexOf("どっちの推理ショー"));
-  assert.ok(names.indexOf("平成のホームズ") < names.indexOf("外交官殺人事件"));
+  assert.ok(names.indexOf("集められた名探偵") < names.indexOf("牧場に堕ちた火種"));
+  assert.ok(names.indexOf("牧場に堕ちた火種") < names.indexOf("囚われた刑事"));
+});
+
+test("uses Japanese name order for equal usage without color grouping", () => {
+  const names = caseCardsForPartnerColor("yellow").map((card) => card.name);
+  const alphabetical = [...names].sort((left, right) => left.localeCompare(right, "ja"));
+
+  assert.deepEqual(names, alphabetical);
 });

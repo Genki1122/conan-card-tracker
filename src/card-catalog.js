@@ -93,13 +93,10 @@ export function caseCardsForPartnerColor(partnerColor, usageCounts = {}) {
   if (!normalizedColor) return [];
   return caseCards
     .filter((card) => card.colors.includes(normalizedColor))
-    .map((card, index) => ({ card, index }))
     .sort((left, right) => (
-      caseCardRank(left.card, normalizedColor) - caseCardRank(right.card, normalizedColor)
-      || caseCardUsage(usageCounts, right.card.id) - caseCardUsage(usageCounts, left.card.id)
-      || left.index - right.index
-    ))
-    .map(({ card }) => card);
+      caseCardUsage(usageCounts, right.id) - caseCardUsage(usageCounts, left.id)
+      || left.name.localeCompare(right.name, "ja")
+    ));
 }
 
 export function findCaseCardByName(name) {
@@ -114,12 +111,6 @@ export function isCaseCardAvailableForPartnerColor(caseCardId, partnerColor) {
   const card = getCaseCard(caseCardId);
   const color = normalizePartnerColor(partnerColor);
   return Boolean(card && color && card.colors.includes(color));
-}
-
-function caseCardRank(card, partnerColor) {
-  if (card.allColors) return 2;
-  if (card.colors.length === 1 && card.colors[0] === partnerColor) return 0;
-  return 1;
 }
 
 function caseCardUsage(usageCounts, caseCardId) {

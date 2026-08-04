@@ -70,7 +70,6 @@ import {
 import {
   caseCardColorLabel,
   caseCardsForPartnerColor,
-  findCaseCardByName,
   getCaseCard,
   isCaseCardAvailableForPartnerColor,
   normalizePartnerColor,
@@ -137,6 +136,12 @@ const dialogKicker = document.querySelector("#dialogKicker");
 const dialogTitle = document.querySelector("#dialogTitle");
 const dialogFields = document.querySelector("#dialogFields");
 const dialogSubmit = document.querySelector("#dialogSubmit");
+const caseCardDialog = document.querySelector("#caseCardDialog");
+const caseCardDialogKicker = document.querySelector("#caseCardDialogKicker");
+const caseCardDialogClose = document.querySelector("#caseCardDialogClose");
+const caseCardSearch = document.querySelector("#caseCardSearch");
+const caseCardOptionsView = document.querySelector("#caseCardOptions");
+const caseCardClear = document.querySelector("#caseCardClear");
 const navButtons = [...document.querySelectorAll(".nav-button")];
 const suggestionLists = {
   opponentDecks: document.querySelector("#opponentDeckSuggestions"),
@@ -171,6 +176,7 @@ let environmentCatalogError = "";
 let environmentCatalogMessage = "";
 let dataSettingsMessage = "";
 let accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
+let activeCaseCardScope = "";
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -1982,7 +1988,7 @@ function openDialog(mode, targetId = null) {
       <label>デッキ名<input name="name" required placeholder="例: 高木婚活"></label>
       <label>初期バージョン<input name="version" required value="v1" placeholder="例: v1 / 新弾後"></label>
       ${partnerColorChoices("partnerColor", "", "deck")}
-      ${caseCardPicker({ inputName: "caseCardName", listId: "deckCaseCardSuggestions", scope: "deck" })}
+      ${caseCardPicker({ inputName: "caseCardName", scope: "deck" })}
     `;
   }
 
@@ -2082,7 +2088,6 @@ function openDialog(mode, targetId = null) {
           ${partnerColorChoices("sessionPartnerColor", selectedSessionPartnerColor, "session")}
           ${caseCardPicker({
             inputName: "sessionCaseCardName",
-            listId: "sessionCaseCardSuggestions",
             selectedCaseCardId: selectedSessionCaseCardId,
             partnerColor: selectedSessionPartnerColor,
             scope: "session"
@@ -2123,7 +2128,6 @@ function openDialog(mode, targetId = null) {
         ${partnerColorChoices("opponentPartnerColor", editingMatch?.opponentPartnerColor || "", "opponent")}
         ${caseCardPicker({
           inputName: "opponentCaseCardName",
-          listId: "opponentCaseCardSuggestions",
           selectedCaseCardId: editingMatch?.opponentCaseCardId || "",
           partnerColor: editingMatch?.opponentPartnerColor || "",
           scope: "opponent"
@@ -2519,6 +2523,12 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  const caseCardTrigger = event.target.closest("[data-open-case-card-picker]");
+  if (caseCardTrigger) {
+    openCaseCardDialog(caseCardTrigger.dataset.openCaseCardPicker);
+    return;
+  }
+
   const playerSuggestion = event.target.closest("[data-player-name-suggestion]");
   if (playerSuggestion) {
     const field = playerSuggestion.closest(".player-name-field");
@@ -3037,8 +3047,31 @@ if (accountOnboardingActive) {
 refreshCloudSession();
 
 dialog.addEventListener("close", () => {
+  closeCaseCardDialog();
   accountOnboardingActive = false;
 });
+
+caseCardDialogClose.addEventListener("click", closeCaseCardDialog);
+caseCardClear.addEventListener("click", clearCaseCardSelection);
+
+caseCardDialog.addEventListener("click", (event) => {
+  if (event.target === caseCardDialog) {
+    closeCaseCardDialog();
+    return;
+  }
+  const option = event.target.closest("[data-select-case-card]");
+  if (option) selectCaseCard(option.dataset.selectCaseCard);
+});
+
+caseCardDialog.addEventListener("close", () => {
+  activeCaseCardScope = "";
+});
+
+caseCardSearch.addEventListener("input", (event) => {
+  if (shouldUpdateSearchFromInput(event)) renderCaseCardDialogOptions();
+});
+
+caseCardSearch.addEventListener("compositionend", renderCaseCardDialogOptions);
 
 function passOptions(selected = "none") {
   return [
@@ -3071,37 +3104,120 @@ function partnerColorChoices(name, selected = "", scope = "") {
   `;
 }
 
-function caseCardPicker({ inputName, listId, selectedCaseCardId = "", partnerColor = "", scope = "" }) {
+function caseCardPicker({ inputName, selectedCaseCardId = "", partnerColor = "", scope = "" }) {
   const color = normalizePartnerColor(partnerColor);
   const candidates = caseCardsForPartnerColor(color, caseCardUsageCounts(scope));
   const selectedCard = getCaseCard(selectedCaseCardId);
-  const selectedName = selectedCard && isCaseCardAvailableForPartnerColor(selectedCard.id, color) ? selectedCard.name : "";
+  const validSelection = selectedCard && isCaseCardAvailableForPartnerColor(selectedCard.id, color) ? selectedCard : null;
   const disabled = !color || candidates.length === 0;
-  const placeholder = !color ? "先にパートナーの色を選択" : candidates.length ? "カード名で検索・選択" : "この色の候補は準備中";
+  const placeholder = caseCardPickerPlaceholder(color, candidates.length);
   return `
-    <label>事件カード
-      <input type="search" name="${inputName}" list="${listId}" data-case-card-input="${scope}" value="${escapeHtml(selectedName)}" placeholder="${placeholder}" ${disabled ? "disabled" : ""} autocomplete="off">
-      <datalist id="${listId}" data-case-card-list="${scope}">${caseCardOptions(candidates)}</datalist>
-    </label>
+    <div class="case-card-picker" data-case-card-picker="${scope}">
+      <span class="case-card-picker-label">事件カード</span>
+      <input type="hidden" name="${inputName}" data-case-card-input="${scope}" value="${escapeHtml(validSelection?.id || "")}">
+      <button class="case-card-trigger" type="button" data-open-case-card-picker="${scope}" ${disabled ? "disabled" : ""}>
+        <span data-case-card-selection="${scope}" class="${validSelection ? "" : "is-placeholder"}">${escapeHtml(validSelection?.name || placeholder)}</span>
+        <b aria-hidden="true">›</b>
+      </button>
+    </div>
   `;
 }
 
-function caseCardOptions(cards) {
-  return cards.map((card) => `<option value="${escapeHtml(card.name)}">${escapeHtml(caseCardColorLabel(card))}</option>`).join("");
+function caseCardPickerPlaceholder(color, candidateCount) {
+  if (!color) return "先にパートナーの色を選択";
+  return candidateCount ? "事件カードを選択" : "この色の候補は準備中";
 }
 
 function updateCaseCardPicker(scope, partnerColor) {
   const input = dialogFields.querySelector(`[data-case-card-input="${scope}"]`);
-  const list = dialogFields.querySelector(`[data-case-card-list="${scope}"]`);
-  if (!input || !list) return;
+  const trigger = dialogFields.querySelector(`[data-open-case-card-picker="${scope}"]`);
+  const selection = dialogFields.querySelector(`[data-case-card-selection="${scope}"]`);
+  if (!input || !trigger || !selection) return;
   const color = normalizePartnerColor(partnerColor);
   const candidates = caseCardsForPartnerColor(color, caseCardUsageCounts(scope));
-  const selectedCard = findCaseCardByName(input.value);
+  const selectedCard = getCaseCard(input.value);
   if (selectedCard && !isCaseCardAvailableForPartnerColor(selectedCard.id, color)) input.value = "";
-  input.disabled = !color || candidates.length === 0;
-  input.placeholder = !color ? "先にパートナーの色を選択" : candidates.length ? "カード名で検索・選択" : "この色の候補は準備中";
-  list.innerHTML = caseCardOptions(candidates);
-  input.setCustomValidity("");
+  const currentCard = getCaseCard(input.value);
+  trigger.disabled = !color || candidates.length === 0;
+  selection.textContent = currentCard?.name || caseCardPickerPlaceholder(color, candidates.length);
+  selection.classList.toggle("is-placeholder", !currentCard);
+  if (!color || candidates.length === 0) {
+    if (caseCardDialog.open && activeCaseCardScope === scope) closeCaseCardDialog();
+    return;
+  }
+  openCaseCardDialog(scope);
+}
+
+function activeCaseCardColor() {
+  return normalizePartnerColor(
+    dialogFields.querySelector(`[data-partner-color-input="${activeCaseCardScope}"]:checked`)?.value
+  );
+}
+
+function openCaseCardDialog(scope) {
+  const picker = dialogFields.querySelector(`[data-case-card-picker="${scope}"]`);
+  const color = normalizePartnerColor(
+    dialogFields.querySelector(`[data-partner-color-input="${scope}"]:checked`)?.value
+  );
+  if (!picker || !color) return;
+  activeCaseCardScope = scope;
+  caseCardSearch.value = "";
+  caseCardDialogKicker.textContent = `${partnerColorLabel(color)}パートナー`;
+  renderCaseCardDialogOptions();
+  if (!caseCardDialog.open) caseCardDialog.showModal();
+}
+
+function closeCaseCardDialog() {
+  if (caseCardDialog.open) caseCardDialog.close();
+  activeCaseCardScope = "";
+}
+
+function renderCaseCardDialogOptions() {
+  const color = activeCaseCardColor();
+  if (!color) {
+    caseCardOptionsView.innerHTML = "";
+    return;
+  }
+  const usageCounts = caseCardUsageCounts(activeCaseCardScope);
+  const query = String(caseCardSearch.value || "").trim().normalize("NFKC").toLocaleLowerCase("ja");
+  const cards = caseCardsForPartnerColor(color, usageCounts).filter((card) => (
+    !query || card.name.normalize("NFKC").toLocaleLowerCase("ja").includes(query)
+  ));
+  const selectedId = dialogFields.querySelector(`[data-case-card-input="${activeCaseCardScope}"]`)?.value || "";
+  caseCardOptionsView.innerHTML = cards.length ? cards.map((card) => {
+    const usage = Number(usageCounts[card.id] || 0);
+    return `
+      <button class="case-card-option" type="button" role="option" data-select-case-card="${card.id}" aria-selected="${card.id === selectedId}">
+        <span>
+          <strong>${escapeHtml(card.name)}</strong>
+          <small>${escapeHtml(caseCardColorLabel(card))}</small>
+        </span>
+        ${usage ? `<b>${usage}回</b>` : ""}
+      </button>
+    `;
+  }).join("") : `<p class="case-card-empty">一致する事件カードがありません。</p>`;
+}
+
+function selectCaseCard(caseCardId) {
+  const input = dialogFields.querySelector(`[data-case-card-input="${activeCaseCardScope}"]`);
+  const selection = dialogFields.querySelector(`[data-case-card-selection="${activeCaseCardScope}"]`);
+  const card = getCaseCard(caseCardId);
+  if (!input || !selection || !card || !isCaseCardAvailableForPartnerColor(card.id, activeCaseCardColor())) return;
+  input.value = card.id;
+  selection.textContent = card.name;
+  selection.classList.remove("is-placeholder");
+  closeCaseCardDialog();
+}
+
+function clearCaseCardSelection() {
+  const scope = activeCaseCardScope;
+  const input = dialogFields.querySelector(`[data-case-card-input="${scope}"]`);
+  const selection = dialogFields.querySelector(`[data-case-card-selection="${scope}"]`);
+  if (!input || !selection) return;
+  input.value = "";
+  selection.textContent = "事件カードを選択";
+  selection.classList.add("is-placeholder");
+  closeCaseCardDialog();
 }
 
 function caseCardUsageCounts(scope) {
@@ -3125,13 +3241,10 @@ function updateSessionVersionPicker(deckId) {
 
 function selectedCaseCardId(inputName, partnerColor) {
   const input = dialogFields.querySelector(`input[name="${inputName}"]`);
-  const name = input?.value.trim() || "";
-  if (!name) return "";
-  const card = findCaseCardByName(name);
-  if (card && isCaseCardAvailableForPartnerColor(card.id, partnerColor)) return card.id;
-  input.setCustomValidity("候補から事件カードを選択してください");
-  input.reportValidity();
-  input.setCustomValidity("");
+  const caseCardId = input?.value.trim() || "";
+  if (!caseCardId) return "";
+  if (isCaseCardAvailableForPartnerColor(caseCardId, partnerColor)) return caseCardId;
+  openCaseCardDialog(input?.dataset.caseCardInput || "");
   return null;
 }
 
@@ -3772,7 +3885,6 @@ function routeActionMarkup() {
         ${partnerColorChoices("deckPartnerColor", deck.partnerColor || "", "deck-settings")}
         ${caseCardPicker({
           inputName: "deckCaseCardName",
-          listId: "deckSettingsCaseCardSuggestions",
           selectedCaseCardId: deck.caseCardId || "",
           partnerColor: deck.partnerColor || "",
           scope: "deck-settings"

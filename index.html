@@ -68,6 +68,23 @@
       </form>
     </dialog>
 
+    <dialog id="caseCardDialog" class="case-card-dialog" aria-labelledby="caseCardDialogTitle">
+      <section class="case-card-dialog-inner">
+        <header class="case-card-dialog-head">
+          <div>
+            <p id="caseCardDialogKicker">Case card</p>
+            <h2 id="caseCardDialogTitle">事件カードを選択</h2>
+          </div>
+          <button id="caseCardDialogClose" class="icon-button" type="button" aria-label="閉じる">×</button>
+        </header>
+        <label class="case-card-search-label">候補を検索
+          <input id="caseCardSearch" type="search" placeholder="カード名で検索" autocomplete="off">
+        </label>
+        <div id="caseCardOptions" class="case-card-options" role="listbox" aria-label="事件カード候補"></div>
+        <button id="caseCardClear" class="case-card-clear" type="button">未記録に戻す</button>
+      </section>
+    </dialog>
+
     <datalist id="opponentDeckSuggestions"></datalist>
     <datalist id="playerSuggestions"></datalist>
     <datalist id="sessionNameSuggestions"></datalist>
