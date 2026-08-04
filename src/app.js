@@ -177,6 +177,7 @@ let environmentCatalogMessage = "";
 let dataSettingsMessage = "";
 let accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
 let activeCaseCardScope = "";
+let caseCardReturnFocus = null;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -3055,7 +3056,7 @@ caseCardDialogClose.addEventListener("click", closeCaseCardDialog);
 caseCardClear.addEventListener("click", clearCaseCardSelection);
 
 caseCardDialog.addEventListener("click", (event) => {
-  if (event.target === caseCardDialog) {
+  if (event.target.closest("[data-close-case-card-picker]")) {
     closeCaseCardDialog();
     return;
   }
@@ -3063,8 +3064,10 @@ caseCardDialog.addEventListener("click", (event) => {
   if (option) selectCaseCard(option.dataset.selectCaseCard);
 });
 
-caseCardDialog.addEventListener("close", () => {
-  activeCaseCardScope = "";
+caseCardDialog.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  closeCaseCardDialog();
 });
 
 caseCardSearch.addEventListener("input", (event) => {
@@ -3142,7 +3145,7 @@ function updateCaseCardPicker(scope, partnerColor) {
   selection.textContent = currentCard?.name || caseCardPickerPlaceholder(color, candidates.length);
   selection.classList.toggle("is-placeholder", !currentCard);
   if (!color || candidates.length === 0) {
-    if (caseCardDialog.open && activeCaseCardScope === scope) closeCaseCardDialog();
+    if (!caseCardDialog.hidden && activeCaseCardScope === scope) closeCaseCardDialog();
   }
 }
 
@@ -3154,21 +3157,33 @@ function activeCaseCardColor() {
 
 function openCaseCardDialog(scope) {
   const picker = dialogFields.querySelector(`[data-case-card-picker="${scope}"]`);
+  const trigger = dialogFields.querySelector(`[data-open-case-card-picker="${scope}"]`);
   const color = normalizePartnerColor(
     dialogFields.querySelector(`[data-partner-color-input="${scope}"]:checked`)?.value
   );
-  if (!picker || !color) return;
+  if (!picker || !trigger || !color) return;
   activeCaseCardScope = scope;
+  caseCardReturnFocus = trigger;
   caseCardSearch.value = "";
   caseCardDialogKicker.textContent = partnerColorLabel(color);
   caseCardClear.hidden = !dialogFields.querySelector(`[data-case-card-input="${scope}"]`)?.value;
   renderCaseCardDialogOptions();
-  if (!caseCardDialog.open) caseCardDialog.showModal();
+  caseCardOptionsView.scrollTop = 0;
+  entryForm.inert = true;
+  caseCardDialog.hidden = false;
+  requestAnimationFrame(() => {
+    caseCardOptionsView.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    caseCardDialogClose.focus({ preventScroll: true });
+  });
 }
 
 function closeCaseCardDialog() {
-  if (caseCardDialog.open) caseCardDialog.close();
+  const returnFocus = caseCardReturnFocus;
+  caseCardDialog.hidden = true;
+  entryForm.inert = false;
   activeCaseCardScope = "";
+  caseCardReturnFocus = null;
+  if (dialog.open && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
 }
 
 function renderCaseCardDialogOptions() {

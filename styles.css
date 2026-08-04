@@ -1042,7 +1042,8 @@ button {
 }
 
 .sheet {
-  width: min(440px, calc(100vw - 28px));
+  width: min(440px, calc(100vw - 38px));
+  max-width: calc(100vw - 38px);
   border: 1px solid var(--line);
   border-radius: 24px;
   padding: 0;
@@ -3101,24 +3102,41 @@ button.pending-match-chip {
   line-height: 1;
 }
 
-.case-card-dialog {
+.case-card-overlay {
   position: fixed;
-  inset: auto 0 0;
-  width: min(100%, 480px);
-  max-width: none;
-  margin: 0 auto;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  padding: 19px max(19px, env(safe-area-inset-right)) max(19px, env(safe-area-inset-bottom)) max(19px, env(safe-area-inset-left));
+}
+
+.case-card-overlay[hidden] {
+  display: none;
+}
+
+.case-card-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.48);
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.case-card-dialog {
+  position: relative;
+  width: min(440px, calc(100vw - 38px));
+  max-width: calc(100vw - 38px);
   border: 1px solid var(--line);
-  border-bottom: 0;
-  border-radius: 20px 20px 0 0;
+  border-radius: 20px;
   padding: 0;
   overflow: hidden;
   background: var(--card);
   color: var(--text);
   box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.44);
-}
-
-.case-card-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.42);
 }
 
 .case-card-dialog-inner {
@@ -3127,7 +3145,7 @@ button.pending-match-chip {
   gap: 10px;
   height: min(62vh, 560px);
   height: min(62dvh, 560px);
-  padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+  padding: 12px 14px;
 }
 
 .case-card-dialog-head {
