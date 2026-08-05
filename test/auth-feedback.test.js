@@ -28,7 +28,7 @@ test("email and network failures have actionable Japanese messages", () => {
 test("OTP failures explain whether to check the code or connection", () => {
   assert.equal(
     authOtpErrorMessage(new Error("Token has expired or is invalid")),
-    "コードが正しくないか、有効期限が切れています。最新メールの6桁コードを確認してください。"
+    "コードが正しくないか、有効期限が切れています。最新メールの認証コードを確認してください。"
   );
   assert.equal(
     authOtpErrorMessage(new Error("Failed to fetch")),

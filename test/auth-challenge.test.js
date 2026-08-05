@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   clearAuthChallenge,
   createAuthChallenge,
+  isValidOtpCode,
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
@@ -60,8 +61,16 @@ test("clears an OTP challenge after login or cancellation", () => {
   assert.equal(loadAuthChallenge(storage), null);
 });
 
-test("normalizes pasted six-digit codes", () => {
-  assert.equal(normalizeOtpCode("１２３ ４５６"), "123456");
+test("normalizes pasted email codes without truncating configured digits", () => {
+  assert.equal(normalizeOtpCode("１２３４ ５６７８"), "12345678");
   assert.equal(normalizeOtpCode("code: 123-456"), "123456");
-  assert.equal(normalizeOtpCode("1234567"), "123456");
+  assert.equal(normalizeOtpCode("1234567890"), "1234567890");
+});
+
+test("accepts every OTP length supported by Supabase", () => {
+  assert.equal(isValidOtpCode("123456"), true);
+  assert.equal(isValidOtpCode("12345678"), true);
+  assert.equal(isValidOtpCode("1234567890"), true);
+  assert.equal(isValidOtpCode("12345"), false);
+  assert.equal(isValidOtpCode("12345678901"), false);
 });

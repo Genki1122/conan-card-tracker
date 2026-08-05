@@ -48,6 +48,9 @@ export function clearAuthChallenge(storage) {
 export function normalizeOtpCode(value) {
   return String(value || "")
     .normalize("NFKC")
-    .replace(/\D/g, "")
-    .slice(0, 6);
+    .replace(/\D/g, "");
+}
+
+export function isValidOtpCode(value) {
+  return /^\d{6,10}$/.test(String(value || ""));
 }

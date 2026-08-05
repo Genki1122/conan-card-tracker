@@ -36,10 +36,11 @@ import {
 import {
   clearAuthChallenge,
   createAuthChallenge,
+  isValidOtpCode,
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=45";
+} from "./auth-challenge.js?v=46";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -48,7 +49,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=45";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=46";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -114,7 +115,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=45";
+} from "./cloud.js?v=46";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -2686,8 +2687,8 @@ dialogFields.addEventListener("click", (event) => {
       openDialog("cloudSettings");
       return;
     }
-    if (token.length !== 6) {
-      input.setCustomValidity("メールに届いた6桁の認証コードを入力してください");
+    if (!isValidOtpCode(token)) {
+      input.setCustomValidity("メールに届いた認証コードを省略せず入力してください");
       input.reportValidity();
       input.setCustomValidity("");
       return;
@@ -3732,7 +3733,7 @@ function cloudMenuMarkup() {
         ${termsDisclosureMarkup()}
         <label class="consent-field"><input name="termsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
         <button class="primary-button inline-action" type="button" data-cloud-login>登録コードをメールで受け取る</button>
-        <p class="form-note">メールに届く6桁コードを、この画面へ入力します。パスワードは不要です。</p>
+        <p class="form-note">メールに届く認証コードを、この画面へ入力します。パスワードは不要です。</p>
         <details class="terms-disclosure existing-login">
           <summary>登録済みの方はこちら</summary>
           <p>Safariではログイン済みでも、ホーム画面のアプリではここからログインコードを受け取ってください。</p>
@@ -3802,13 +3803,13 @@ function registrationSentMarkup() {
   const isSignup = registrationFeedback.mode === "signup";
   return `
     <section class="registration-sent">
-      <span class="registration-sent-mark">6</span>
+      <span class="registration-sent-mark">#</span>
       <strong role="status">${isSignup ? "登録コード" : "ログインコード"}を送信しました</strong>
       <b>${escapeHtml(registrationFeedback.email)}</b>
-      <p>メールを確認してこの画面に戻り、6桁コードを入力してください。</p>
+      <p>メールを確認してこの画面に戻り、表示された認証コードを入力してください。</p>
       <label class="auth-code-field">
-        <span>6桁の認証コード</span>
-        <input name="cloudOtp" data-auth-otp inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" placeholder="123456">
+        <span>認証コード</span>
+        <input name="cloudOtp" data-auth-otp inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" placeholder="12345678">
       </label>
       <button class="primary-button inline-action" type="button" data-verify-auth-code>認証して続ける</button>
       <small>届かない場合は、迷惑メールフォルダと入力したアドレスを確認してください。</small>

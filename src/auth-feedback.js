@@ -18,11 +18,11 @@ export function authOtpErrorMessage(error) {
   const message = String(error?.message || "").toLowerCase();
 
   if (message.includes("expired") || message.includes("invalid") || message.includes("token")) {
-    return "コードが正しくないか、有効期限が切れています。最新メールの6桁コードを確認してください。";
+    return "コードが正しくないか、有効期限が切れています。最新メールの認証コードを確認してください。";
   }
   if (message.includes("network") || message.includes("fetch")) {
     return "通信に失敗しました。接続状況を確認して、もう一度お試しください。";
   }
 
-  return "認証できませんでした。6桁コードを確認して、もう一度お試しください。";
+  return "認証できませんでした。認証コードを確認して、もう一度お試しください。";
 }
