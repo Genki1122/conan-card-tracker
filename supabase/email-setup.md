@@ -4,21 +4,22 @@
 
 Supabase Dashboardの `Authentication > Email Templates` で設定します。
 
-- Confirm signup
-  - Subject: `【CONAN CARD Tracker】ユーザー登録を完了してください`
+- Confirm sign up
+  - Subject: `【CONAN CARD Tracker】ユーザー登録用コード`
   - Body: `supabase/templates/confirmation.html`
-- Magic Link
-  - Subject: `【CONAN CARD Tracker】ログイン用リンクをお送りします`
+- Magic link or OTP
+  - Subject: `【CONAN CARD Tracker】ログイン用コード`
   - Body: `supabase/templates/magic-link.html`
 
-テンプレート内の `{{ .ConfirmationURL }}` は変更しません。
+テンプレート内の `{{ .Token }}` はホーム画面アプリ内で認証するために必要です。移行期間中は旧画面からも認証できるよう、`{{ .ConfirmationURL }}` のリンクも残します。
 
 ### Dashboardへ反映
 
 1. `Authentication > Email Templates` を開きます。
-2. `Confirm signup` を開き、SubjectとBodyを上記内容へ差し替えて保存します。
-3. `Magic Link` も同様に差し替えて保存します。
-4. 新規登録画面から自分の別メールアドレスへ送信し、日本語の件名・本文・遷移先を確認します。
+2. `Confirm sign up` を開き、SubjectとBodyを上記内容へ差し替えて保存します。
+3. `Magic link or OTP` も同様に差し替えて保存します。
+4. 新規登録画面から自分の別メールアドレスへ送信し、6桁コードが本文に表示されることを確認します。
+5. iPhoneのホーム画面アプリへコードを入力し、そのアプリ内でログイン状態になることを確認します。
 
 ## Custom SMTP
 

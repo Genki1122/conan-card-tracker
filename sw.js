@@ -1,4 +1,4 @@
-const CACHE_NAME = "conan-card-tracker-v43";
+const CACHE_NAME = "conan-card-tracker-v45";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,14 +8,15 @@ const ASSETS = [
   "./privacy.html",
   "./legal.css",
   "./styles.css",
-  "./src/app.js",
+  "./src/app.js?v=45",
   "./src/analytics.js",
   "./src/sync-state.js",
   "./src/onboarding.js",
   "./src/initial-state.js",
   "./src/admin-analytics.js",
   "./src/admin-view.js",
-  "./src/auth-feedback.js",
+  "./src/auth-feedback.js?v=45",
+  "./src/auth-challenge.js?v=45",
   "./src/account-storage.js",
   "./src/account-recovery.js",
   "./src/data-quality.js",
@@ -24,7 +25,7 @@ const ASSETS = [
   "./src/session-share.js",
   "./src/ime-input.js",
   "./src/player-names.js",
-  "./src/cloud.js",
+  "./src/cloud.js?v=45",
   "./src/supabase-config.js?v=2",
   "./manifest.webmanifest",
   "./icon-192.png",
@@ -52,7 +53,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request).then((response) => {
+      fetch(event.request, { cache: "no-store" }).then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
         return response;
@@ -62,7 +63,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    fetch(event.request).then((response) => {
+    fetch(event.request, { cache: "no-store" }).then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;

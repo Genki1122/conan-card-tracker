@@ -31,7 +31,7 @@ python3 -m http.server 4174
 3. Authentication > URL Configurationで、GitHub PagesのURLをSite URLとRedirect URLsに登録します。
 4. Project Settings > APIから `Project URL` と `anon public` keyを控えます。
 5. `src/supabase-config.js`へProject URLとPublishable keyを設定します。
-6. 友人は手引書の「無料でユーザー登録」からメールアドレスを入力します。
+6. 友人はホーム画面へ追加したアプリの「無料でユーザー登録」からメールアドレスを入力し、メールに届く6桁コードで認証します。
 
 `0harry0wilder0@gmail.com` で登録した利用者には `superadmin` が付与され、3点メニューから管理者画面を開けます。管理画面はRLSで保護され、一般利用者からは表示・参照できません。
 
@@ -49,12 +49,13 @@ python3 -m http.server 4174
 
 公開URLはそのまま共有できます。ログインしない利用者のデータは各ブラウザ内だけに保存されます。
 
-同じSupabaseプロジェクトを複数人で使う場合も、`app_states.user_id`とRLSにより各利用者のデータは分離されます。リンクを開くだけでメールログインできる状態にするには、次の準備が必要です。
+同じSupabaseプロジェクトを複数人で使う場合も、`app_states.user_id`とRLSにより各利用者のデータは分離されます。6桁コードでメールログインできる状態にするには、次の準備が必要です。
 
 1. `src/supabase-config.js`へProject URLとPublishable keyを設定します（このリポジトリでは設定済みです）。
 2. Supabase AuthenticationのSite URLとRedirect URLsへ本番URLを正確に登録します。
-3. 友人は自分のメールアドレスでログインします。
-4. 少人数テストを超えて共有する前に、Authのメール送信上限を確認し、必要ならCustom SMTPを設定します。
+3. `supabase/email-setup.md`に従って、Confirm sign upとMagic link or OTPの本文へ`{{ .Token }}`を含むテンプレートを設定します。
+4. 友人は自分のメールアドレスへ届いた6桁コードを、ホーム画面アプリへ入力します。
+5. 少人数テストを超えて共有する前に、Authのメール送信上限を確認し、必要ならCustom SMTPを設定します。
 
 日本語メール本文とCustom SMTPの設定項目は `supabase/email-setup.md` にまとめています。SMTPパスワードはGitHubへ保存せず、Supabase Dashboardへ直接入力してください。
 

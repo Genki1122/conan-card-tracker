@@ -34,6 +34,13 @@ import {
   validateUsername
 } from "./onboarding.js";
 import {
+  clearAuthChallenge,
+  createAuthChallenge,
+  loadAuthChallenge,
+  normalizeOtpCode,
+  saveAuthChallenge
+} from "./auth-challenge.js?v=45";
+import {
   buildAdminDashboard,
   buildAdminOverview,
   buildAiTrainingDataset,
@@ -41,7 +48,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage } from "./auth-feedback.js";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=45";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -105,8 +112,9 @@ import {
   saveCloudState,
   signInWithEmail,
   signOutCloud,
-  updateProfileUsername
-} from "./cloud.js";
+  updateProfileUsername,
+  verifyEmailOtp
+} from "./cloud.js?v=45";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -169,7 +177,7 @@ let pendingRemoteState = null;
 let accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
 let adminState = { loading: false, error: "", data: null, raw: null };
 let adminPreview = null;
-let registrationFeedback = null;
+let registrationFeedback = loadAuthChallenge(localStorage);
 let environmentCatalog = [];
 let environmentCatalogReady = false;
 let environmentCatalogError = "";
@@ -2510,6 +2518,8 @@ dialogFields.addEventListener("change", (event) => {
 dialogFields.addEventListener("input", (event) => {
   const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput && !event.isComposing) updatePlayerNameSuggestions(playerInput);
+  const otpInput = event.target.closest("[data-auth-otp]");
+  if (otpInput) otpInput.value = normalizeOtpCode(otpInput.value);
 });
 
 dialogFields.addEventListener("compositionend", (event) => {
@@ -2615,7 +2625,12 @@ dialogFields.addEventListener("click", (event) => {
     button.textContent = "メール送信中...";
     signInWithEmail(email, { username, termsVersion })
       .then(() => {
-        registrationFeedback = { email, username };
+        registrationFeedback = saveAuthChallenge(localStorage, createAuthChallenge({
+          email,
+          username,
+          mode: "signup",
+          termsVersion
+        }));
         cloudMessage = "";
         openDialog("cloudSettings");
       })
@@ -2627,6 +2642,7 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-reset-registration]")) {
+    clearAuthChallenge(localStorage);
     registrationFeedback = null;
     cloudMessage = "";
     openDialog("cloudSettings");
@@ -2647,7 +2663,67 @@ dialogFields.addEventListener("click", (event) => {
     button.textContent = "メール送信中...";
     signInWithEmail(email, {}, false)
       .then(() => {
-        cloudMessage = "ログイン用メールを送信しました";
+        registrationFeedback = saveAuthChallenge(localStorage, createAuthChallenge({
+          email,
+          mode: "login"
+        }));
+        cloudMessage = "";
+        openDialog("cloudSettings");
+      })
+      .catch((error) => {
+        cloudMessage = authEmailErrorMessage(error);
+        openDialog("cloudSettings");
+      });
+    return;
+  }
+
+  if (event.target.closest("[data-verify-auth-code]")) {
+    const button = event.target.closest("[data-verify-auth-code]");
+    const input = dialogFields.querySelector("input[name='cloudOtp']");
+    const token = normalizeOtpCode(input?.value);
+    if (!registrationFeedback) {
+      cloudMessage = "認証情報の有効期限が切れました。もう一度コードを送信してください。";
+      openDialog("cloudSettings");
+      return;
+    }
+    if (token.length !== 6) {
+      input.setCustomValidity("メールに届いた6桁の認証コードを入力してください");
+      input.reportValidity();
+      input.setCustomValidity("");
+      return;
+    }
+    const mode = registrationFeedback.mode;
+    button.disabled = true;
+    button.textContent = "認証中...";
+    verifyEmailOtp(registrationFeedback.email, token)
+      .then(async () => {
+        clearAuthChallenge(localStorage);
+        registrationFeedback = null;
+        await refreshCloudSession();
+        if (!cloudStatus.signedIn) throw new Error("認証状態を確認できませんでした");
+        cloudMessage = mode === "signup" ? "ユーザー登録が完了しました" : "ログインしました";
+        openDialog("cloudSettings");
+      })
+      .catch((error) => {
+        cloudMessage = authOtpErrorMessage(error);
+        openDialog("cloudSettings");
+      });
+    return;
+  }
+
+  if (event.target.closest("[data-resend-auth-code]")) {
+    if (!registrationFeedback) return;
+    const button = event.target.closest("[data-resend-auth-code]");
+    const challenge = registrationFeedback;
+    const account = challenge.mode === "signup"
+      ? { username: challenge.username, termsVersion: challenge.termsVersion || termsVersion }
+      : {};
+    button.disabled = true;
+    button.textContent = "再送信中...";
+    signInWithEmail(challenge.email, account, challenge.mode === "signup")
+      .then(() => {
+        registrationFeedback = saveAuthChallenge(localStorage, createAuthChallenge({ ...challenge }));
+        cloudMessage = "新しい認証コードを送信しました";
         openDialog("cloudSettings");
       })
       .catch((error) => {
@@ -3375,6 +3451,7 @@ async function refreshCloudSession() {
     await refreshEnvironmentCatalog(false);
     if (cloudStatus.signedIn) {
       activateUserLocalState(cloudStatus.userId);
+      clearAuthChallenge(localStorage);
       registrationFeedback = null;
       try {
         accountContext = await loadAccountContext();
@@ -3654,12 +3731,13 @@ function cloudMenuMarkup() {
         <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
         ${termsDisclosureMarkup()}
         <label class="consent-field"><input name="termsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
-        <button class="primary-button inline-action" type="button" data-cloud-login>登録用メールを送る</button>
-        <p class="form-note">届いたメール内のリンクを、この端末で開いてください。パスワードは不要です。</p>
+        <button class="primary-button inline-action" type="button" data-cloud-login>登録コードをメールで受け取る</button>
+        <p class="form-note">メールに届く6桁コードを、この画面へ入力します。パスワードは不要です。</p>
         <details class="terms-disclosure existing-login">
           <summary>登録済みの方はこちら</summary>
+          <p>Safariではログイン済みでも、ホーム画面のアプリではここからログインコードを受け取ってください。</p>
           <label>メールアドレス<input name="existingCloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
-          <button class="primary-button inline-action" type="button" data-cloud-existing-login>ログイン用メールを送る</button>
+          <button class="primary-button inline-action" type="button" data-cloud-existing-login>ログインコードを受け取る</button>
         </details>
       ` : ""}
       ${cloudStatus.signedIn ? `
@@ -3721,14 +3799,23 @@ function termsDisclosureMarkup() {
 }
 
 function registrationSentMarkup() {
+  const isSignup = registrationFeedback.mode === "signup";
   return `
-    <section class="registration-sent" role="status">
-      <span class="registration-sent-mark">✓</span>
-      <strong>登録メールを送信しました</strong>
+    <section class="registration-sent">
+      <span class="registration-sent-mark">6</span>
+      <strong role="status">${isSignup ? "登録コード" : "ログインコード"}を送信しました</strong>
       <b>${escapeHtml(registrationFeedback.email)}</b>
-      <p>メール内の「メールアドレスを確認する」を押すと登録が完了します。</p>
+      <p>メールを確認してこの画面に戻り、6桁コードを入力してください。</p>
+      <label class="auth-code-field">
+        <span>6桁の認証コード</span>
+        <input name="cloudOtp" data-auth-otp inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" placeholder="123456">
+      </label>
+      <button class="primary-button inline-action" type="button" data-verify-auth-code>認証して続ける</button>
       <small>届かない場合は、迷惑メールフォルダと入力したアドレスを確認してください。</small>
-      <button class="primary-button inline-action ghost-action" type="button" data-reset-registration>入力画面に戻る</button>
+      <div class="auth-code-actions">
+        <button type="button" data-resend-auth-code>コードを再送</button>
+        <button type="button" data-reset-registration>メールアドレスを変更</button>
+      </div>
     </section>
   `;
 }

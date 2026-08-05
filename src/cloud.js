@@ -66,6 +66,18 @@ export async function signInWithEmail(email, account = {}, shouldCreateUser = tr
   if (error) throw error;
 }
 
+export async function verifyEmailOtp(email, token) {
+  const supabase = await getClient();
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: "email"
+  });
+  if (error) throw error;
+  currentSession = data.session;
+  return cloudSnapshot("ready");
+}
+
 export async function loadAccountContext() {
   const supabase = await getClient();
   const userId = requireUserId();
