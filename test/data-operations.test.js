@@ -6,6 +6,8 @@ import {
   mergeStoreName,
   previewPlayerNameHonorificTrim,
   renameEnvironmentInState,
+  resolveSessionCreatedAt,
+  sortSessionsNewestFirst,
   trimPlayerNamesAtHonorific,
   updateSessionDeck
 } from "../src/data-operations.js";
@@ -121,4 +123,40 @@ test("previews every player-name change without modifying match records", () => 
     ]
   });
   assert.equal(state.matches[0].opponentPlayer, "プレイヤーAさん入力中");
+});
+
+test("sorts sessions by event date and then by registration time", () => {
+  const sessions = [
+    { id: "morning", date: "2026-08-10", createdAt: "2026-08-10T01:00:00.000Z" },
+    { id: "afternoon", date: "2026-08-10", createdAt: "2026-08-10T06:00:00.000Z" },
+    { id: "next-day", date: "2026-08-11", createdAt: "2026-08-09T23:00:00.000Z" }
+  ];
+
+  const sorted = sortSessionsNewestFirst(sessions);
+
+  assert.deepEqual(sorted.map((session) => session.id), ["next-day", "afternoon", "morning"]);
+  assert.deepEqual(sessions.map((session) => session.id), ["morning", "afternoon", "next-day"]);
+});
+
+test("uses later array positions for legacy sessions registered on the same day", () => {
+  const sessions = [
+    { id: "store-a", date: "2026-08-10" },
+    { id: "store-b", date: "2026-08-10" }
+  ];
+
+  assert.deepEqual(
+    sortSessionsNewestFirst(sessions).map((session) => session.id),
+    ["store-b", "store-a"]
+  );
+});
+
+test("preserves registration time when editing and adds it only to new sessions", () => {
+  const now = "2026-08-10T06:00:00.000Z";
+
+  assert.equal(resolveSessionCreatedAt(null, now), now);
+  assert.equal(
+    resolveSessionCreatedAt({ createdAt: "2026-08-10T01:00:00.000Z" }, now),
+    "2026-08-10T01:00:00.000Z"
+  );
+  assert.equal(resolveSessionCreatedAt({}, now), "");
 });

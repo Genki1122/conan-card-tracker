@@ -12,6 +12,30 @@ export function updateSessionDeck(state, { sessionId, deckId, deckVersion }) {
   };
 }
 
+export function sortSessionsNewestFirst(sessions = []) {
+  return sessions
+    .map((session, index) => ({ session, index }))
+    .sort((left, right) => {
+      const dateOrder = String(right.session.date || "").localeCompare(String(left.session.date || ""));
+      if (dateOrder !== 0) return dateOrder;
+
+      const leftCreatedAt = String(left.session.createdAt || "");
+      const rightCreatedAt = String(right.session.createdAt || "");
+      if (leftCreatedAt && rightCreatedAt) {
+        const createdAtOrder = rightCreatedAt.localeCompare(leftCreatedAt);
+        if (createdAtOrder !== 0) return createdAtOrder;
+      }
+
+      return right.index - left.index;
+    })
+    .map(({ session }) => session);
+}
+
+export function resolveSessionCreatedAt(currentSession, now) {
+  if (currentSession) return String(currentSession.createdAt || "");
+  return String(now || "");
+}
+
 export function sessionVersionOptions(state, deckId, selectedVersion = "") {
   const deck = state.decks.find((item) => item.id === deckId);
   const values = [

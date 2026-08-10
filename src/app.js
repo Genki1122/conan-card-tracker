@@ -40,7 +40,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=46";
+} from "./auth-challenge.js?v=47";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -49,7 +49,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=46";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=47";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -71,7 +71,9 @@ import {
   mergeStoreName,
   previewPlayerNameHonorificTrim,
   renameEnvironmentInState,
+  resolveSessionCreatedAt,
   sessionVersionOptions,
+  sortSessionsNewestFirst,
   trimPlayerNamesAtHonorific,
   updateSessionDeck
 } from "./data-operations.js";
@@ -115,7 +117,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=46";
+} from "./cloud.js?v=47";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -902,7 +904,7 @@ function sessionCardStatus(session, summary) {
 }
 
 function sessionsForStore(storeName) {
-  return state.sessions.filter((session) => session.name === storeName).sort((a, b) => b.date.localeCompare(a.date));
+  return sortSessionsNewestFirst(state.sessions.filter((session) => session.name === storeName));
 }
 
 function sessionRecord(sessionId) {
@@ -1015,7 +1017,7 @@ function renderDecks() {
 function renderDeckDetail(deckId) {
   const deck = getDeck(deckId);
   if (!deck) return setRoute({ name: "decks" });
-  const deckSessions = sessionsForDeck(deckId).sort((a, b) => b.date.localeCompare(a.date));
+  const deckSessions = sortSessionsNewestFirst(sessionsForDeck(deckId));
   const deckMatches = matchesForDeck(deckId);
   const summary = summarizeMatches(deckMatches);
   const passUsage = getMyPassUsage(deckMatches);
@@ -1480,7 +1482,7 @@ function playerRpsMarkup(rps, compact = false) {
 function renderSessions() {
   title.textContent = "大会";
   const selectedView = route.view === "stores" ? "stores" : "sessions";
-  const sessions = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date));
+  const sessions = sortSessionsNewestFirst(state.sessions);
   view.innerHTML = `
     <div class="view-switch" aria-label="大会表示">
       <button class="${selectedView === "sessions" ? "active" : ""}" type="button" data-tournament-view="sessions">セッション</button>
@@ -2215,6 +2217,7 @@ entryForm.addEventListener("submit", (event) => {
     const randomPrizeMethod = data.get("randomPrizeMethod") || "";
     const session = {
       id: editingSessionId || crypto.randomUUID(),
+      createdAt: resolveSessionCreatedAt(currentSession, new Date().toISOString()),
       deckId: data.get("deckId"),
       deckVersion: data.get("deckVersion")?.trim() || selectedDeck?.version || "v1",
       partnerColor: currentSession
