@@ -190,6 +190,37 @@ test("admin dashboard separates usage and data-quality metrics from completed re
   assert.equal(dashboard.quality.fields.find((row) => row.key === "opponentDeck").recorded, 3);
 });
 
+test("admin quality and AI data treat byes as resolved non-game rounds", () => {
+  const byeInput = {
+    profiles: [{ user_id: "u1", username: "利用者" }],
+    consents: [{ user_id: "u1", accepted_at: "2026-07-01T00:00:00Z", ai_training_included: true }],
+    states: [{
+      user_id: "u1",
+      updated_at: "2026-07-20T00:00:00Z",
+      data: {
+        decks: [{ id: "d1", name: "デッキ" }],
+        sessions: [{ id: "s1", deckId: "d1", date: "2026-07-01", environment: "10弾環境" }],
+        matches: [
+          { sessionId: "s1", roundType: "played", result: "win", opponentDeck: "青単" },
+          { sessionId: "s1", roundType: "bye", result: "win", opponentDeck: "" },
+          { sessionId: "s1", roundType: "played", result: "pending", opponentDeck: "緑単" }
+        ]
+      }
+    }]
+  };
+
+  const dashboard = buildAdminDashboard(byeInput, {}, new Date("2026-07-22T00:00:00Z"));
+  const dataset = buildAiTrainingDataset(byeInput);
+
+  assert.equal(dashboard.summary.matches, 1);
+  assert.equal(dashboard.quality.totalRecords, 2);
+  assert.equal(dashboard.quality.completedMatches, 1);
+  assert.equal(dashboard.quality.pendingMatches, 1);
+  assert.equal(dashboard.quality.byeRounds, 1);
+  assert.equal(dataset.length, 1);
+  assert.equal(dataset[0].opponentDeck, "青単");
+});
+
 test("admin user rows include privacy-safe recovery and support statuses", () => {
   const dashboard = buildAdminDashboard({
     ...input,

@@ -5,12 +5,24 @@ function rate(wins, total) {
 
 const completedResults = new Set(["win", "loss", "draw"]);
 
-export function isCompletedMatch(match) {
+export function isByeRound(match) {
+  return match?.roundType === "bye";
+}
+
+export function isResolvedRound(match) {
   return completedResults.has(match?.result);
 }
 
+export function isPlayedMatch(match) {
+  return isResolvedRound(match) && !isByeRound(match);
+}
+
+export function isCompletedMatch(match) {
+  return isPlayedMatch(match);
+}
+
 function completedMatches(matches = []) {
-  return matches.filter(isCompletedMatch);
+  return matches.filter(isPlayedMatch);
 }
 
 function tally(matches, predicate = () => true) {
@@ -142,6 +154,24 @@ export function summarizeMatches(matches = []) {
     first,
     second,
     currentStreak: currentStreak(matches)
+  };
+}
+
+export function summarizeRounds(rounds = []) {
+  const resolved = rounds.filter(isResolvedRound);
+  const wins = resolved.filter((round) => round.result === "win").length;
+  const losses = resolved.filter((round) => round.result === "loss").length;
+  const draws = resolved.filter((round) => round.result === "draw").length;
+
+  return {
+    total: resolved.length,
+    wins,
+    losses,
+    ...(draws > 0 ? { draws } : {}),
+    winRate: rate(wins, resolved.length),
+    first: fullRecord(rounds.filter((round) => round.firstPlayer === "first")),
+    second: fullRecord(rounds.filter((round) => round.firstPlayer === "second")),
+    currentStreak: currentStreak(rounds)
   };
 }
 

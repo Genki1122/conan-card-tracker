@@ -73,6 +73,21 @@ test("does not include pending matches in the record or round list", () => {
   assert.equal(text.includes("FBI"), false);
 });
 
+test("counts a bye in the official record and labels its round explicitly", () => {
+  const text = buildSessionShareText({
+    session: { name: "ショップ大会" },
+    deck: { name: "鬼丸剣道" },
+    matches: [
+      { opponentDeck: "高佐", firstPlayer: "second", result: "loss", roundType: "played" },
+      { opponentDeck: "", firstPlayer: "", result: "win", roundType: "bye" }
+    ]
+  });
+
+  assert.equal(text.includes("結果　1-1"), true);
+  assert.equal(text.includes("－ ○｜不戦勝"), true);
+  assert.equal(text.includes("｜不明"), false);
+});
+
 test("creates an editable X compose URL with the generated text", () => {
   const url = new URL(buildXShareUrl("結果　3-1\n後 ○｜白単"));
 

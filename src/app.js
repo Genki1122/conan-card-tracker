@@ -23,7 +23,8 @@ import {
   playerWinRateTone,
   sortPlayerOverviews,
   summarizeDecks,
-  summarizeMatches
+  summarizeMatches,
+  summarizeRounds
 } from "./analytics.js";
 import { stateSummary, statesEqual } from "./sync-state.js";
 import { createInitialState, removeLegacyMockState } from "./initial-state.js";
@@ -40,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=48";
+} from "./auth-challenge.js?v=49";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -49,7 +50,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=48";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=49";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -90,6 +91,12 @@ import {
   buildSessionShareText,
   buildXShareUrl
 } from "./session-share.js";
+import {
+  matchResultSelection,
+  normalizeRoundRecord,
+  roundFormState,
+  sanitizeRoundRecord
+} from "./rounds.js";
 import { shouldUpdateSearchFromInput } from "./ime-input.js";
 import {
   filterPlayerNameSuggestions,
@@ -117,7 +124,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=48";
+} from "./cloud.js?v=49";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -533,7 +540,7 @@ function normalizeState(rawState) {
       staffRpsHands: [0, 1, 2].map((index) => session.staffRpsHands?.[index] || "")
     })),
     environments: uniqueValues([...(rawState.environments || []).map(normalizeEnvironmentName), ...sessionEnvironments]),
-    matches: (rawState.matches || []).map((match) => ({
+    matches: (rawState.matches || []).map((match) => normalizeRoundRecord({
       ...match,
       opponentPlayer: normalizePlayerName(match.opponentPlayer),
       opponentPartnerColor: normalizePartnerColor(match.opponentPartnerColor),
@@ -913,7 +920,7 @@ function sessionRecord(sessionId) {
 }
 
 function sessionSummary(sessionId) {
-  return summarizeMatches(matchesForSession(sessionId));
+  return summarizeRounds(matchesForSession(sessionId));
 }
 
 function recordText(summary) {
@@ -995,7 +1002,7 @@ function renderDecks() {
   const activeCount = state.decks.length - archivedCount;
 
   view.innerHTML = `
-    ${recordStrip(overall, [`${decks.length}デッキ`, `${visibleSessions.length}大会`, `${visibleMatches.length}試合`])}
+    ${recordStrip(overall, [`${decks.length}デッキ`, `${visibleSessions.length}大会`, `${overall.total}試合`])}
     <div class="view-switch deck-view-switch">
       <button class="${archivedView ? "" : "active"}" type="button" data-deck-view="active">使用中 ${activeCount}</button>
       <button class="${archivedView ? "active" : ""}" type="button" data-deck-view="archived">アーカイブ ${archivedCount}</button>
@@ -1038,7 +1045,7 @@ function renderDeckDetail(deckId) {
           <button class="list-card compact-session-card" type="button" data-open-session="${session.id}">
             <span class="session-card-copy">
               <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong></span>
-              <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${count}試合</span></span>
+              <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${count}ラウンド</span></span>
             </span>
             ${sessionCardStatus(session, summary)}
           </button>
@@ -1052,7 +1059,7 @@ function renderSession(sessionId) {
   const session = getSession(sessionId);
   if (!session) return setRoute({ name: "decks" });
   const rounds = matchesForSession(sessionId);
-  const summary = summarizeMatches(rounds);
+  const summary = summarizeRounds(rounds);
   const pendingRounds = pendingMatchesForSession(sessionId);
   const deck = getDeck(session.deckId);
   const shareUrl = buildXShareUrl(buildSessionShareText({ session, deck, matches: rounds }));
@@ -1070,31 +1077,36 @@ function renderSession(sessionId) {
       <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
       ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
     </section>
-    <div class="section-title-row"><h2>ラウンド</h2><span>${rounds.length}試合</span></div>
+    <div class="section-title-row"><h2>ラウンド</h2><span>${rounds.length}ラウンド</span></div>
     <div class="list-stack">
-      ${rounds.map((match, index) => `
-        <article class="round-card compact-round">
-          <${adminPreview ? "div" : "button"} class="round-main" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
-            <span class="badge">${index + 1}</span>
-            <span>
-              <strong class="round-title">${escapeHtml(match.opponentDeck)}</strong>
-              <span class="round-meta"><span>${firstLabels[match.firstPlayer]}</span></span>
-            </span>
-            <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-          </${adminPreview ? "div" : "button"}>
-          <details class="round-extra">
-            <summary>詳細</summary>
-            <div class="detail-grid">
-              <span>相手: ${escapeHtml(normalizePlayerName(match.opponentPlayer))}</span>
-              ${(match.opponentPartnerColor || match.opponentCaseCardId) ? `<span>色・事件: ${escapeHtml(partnerColorLabel(match.opponentPartnerColor))}${match.opponentCaseCardId ? `・${escapeHtml(getCaseCard(match.opponentCaseCardId)?.name || "事件カード未記録")}` : ""}</span>` : ""}
-              <span>じゃんけん: 相手${rpsLabels[match.opponentRps]}</span>
-              <span>パス 自分:${passLabel(match.myPassed)} 相手:${passLabel(match.opponentPassed)}</span>
-              ${match.memo ? `<span>メモ: ${escapeHtml(match.memo)}</span>` : ""}
-              ${adminPreview ? "" : `<button class="text-button" type="button" data-edit-match="${match.id}">編集する</button>`}
-            </div>
-          </details>
-        </article>
-      `).join("") || `<div class="empty-card">＋ からこのセッションの試合を記録しましょう</div>`}
+      ${rounds.map((match, index) => {
+        const isBye = match.roundType === "bye";
+        return `
+          <article class="round-card compact-round ${isBye ? "bye-round" : ""}">
+            <${adminPreview ? "div" : "button"} class="round-main" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
+              <span class="badge">${index + 1}</span>
+              <span>
+                <strong class="round-title">${isBye ? "不戦勝" : escapeHtml(match.opponentDeck)}</strong>
+                ${isBye ? "" : `<span class="round-meta"><span>${firstLabels[match.firstPlayer]}</span></span>`}
+              </span>
+              <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
+            </${adminPreview ? "div" : "button"}>
+            ${isBye ? "" : `
+              <details class="round-extra">
+                <summary>詳細</summary>
+                <div class="detail-grid">
+                  <span>相手: ${escapeHtml(normalizePlayerName(match.opponentPlayer))}</span>
+                  ${(match.opponentPartnerColor || match.opponentCaseCardId) ? `<span>色・事件: ${escapeHtml(partnerColorLabel(match.opponentPartnerColor))}${match.opponentCaseCardId ? `・${escapeHtml(getCaseCard(match.opponentCaseCardId)?.name || "事件カード未記録")}` : ""}</span>` : ""}
+                  <span>じゃんけん: 相手${rpsLabels[match.opponentRps]}</span>
+                  <span>パス 自分:${passLabel(match.myPassed)} 相手:${passLabel(match.opponentPassed)}</span>
+                  ${match.memo ? `<span>メモ: ${escapeHtml(match.memo)}</span>` : ""}
+                  ${adminPreview ? "" : `<button class="text-button" type="button" data-edit-match="${match.id}">編集する</button>`}
+                </div>
+              </details>
+            `}
+          </article>
+        `;
+      }).join("") || `<div class="empty-card">＋ からこのセッションのラウンドを記録しましょう</div>`}
     </div>
   `;
 }
@@ -2128,14 +2140,18 @@ function openDialog(mode, targetId = null) {
     dialogKicker.textContent = "Round";
     dialogTitle.textContent = editingMatch ? "勝敗を編集" : "勝敗登録";
     dialogSubmit.textContent = editingMatch ? "更新" : "保存";
+    const selectedResult = matchResultSelection(editingMatch);
     dialogFields.innerHTML = `
       <input type="hidden" name="myDeck" value="${escapeHtml(editingMatch?.myDeck || deck?.name || "")}">
-      ${playerNameFieldMarkup({ name: "opponentPlayer", label: "プレイヤー名", value: normalizePlayerName(editingMatch?.opponentPlayer), id: "matchOpponentPlayer" })}
-      <div class="inline-fields">
-        <label>勝敗<select name="result">${optionTags([["pending", "未確定"], ["win", "Win"], ["loss", "Lose"], ["draw", "Draw"]], editingMatch?.result || "pending")}</select></label>
-        <label>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
+      <div class="round-played-field" data-played-round-field>
+        ${playerNameFieldMarkup({ name: "opponentPlayer", label: "プレイヤー名", value: normalizePlayerName(editingMatch?.opponentPlayer), id: "matchOpponentPlayer" })}
       </div>
-      <details class="match-extra-fields" ${editingMatch ? "open" : ""}>
+      <div class="inline-fields">
+        <label>勝敗<select name="result" data-round-result-select>${optionTags([["pending", "未確定"], ["win", "Win"], ["loss", "Lose"], ["draw", "Draw"], ["bye", "不戦勝"]], selectedResult)}</select></label>
+        <label data-played-round-field>先/後<select name="firstPlayer" required>${requiredOptionTags([["first", "先攻"], ["second", "後攻"]], editingMatch?.firstPlayer || "", "選択")}</select></label>
+      </div>
+      <p class="bye-round-note" data-bye-round-note hidden>セッション戦績には1勝として反映し、対戦分析には含まれません</p>
+      <details class="match-extra-fields" data-played-round-field ${editingMatch ? "open" : ""}>
         <summary>色・事件カード・その他</summary>
         ${partnerColorChoices("opponentPartnerColor", editingMatch?.opponentPartnerColor || "", "opponent")}
         ${caseCardPicker({
@@ -2158,7 +2174,23 @@ function openDialog(mode, targetId = null) {
 
   dialog.scrollTop = 0;
   entryForm.scrollTop = 0;
+  if (dialogMode === "match") syncRoundFormFields();
   if (!dialog.open) dialog.showModal();
+}
+
+function syncRoundFormFields() {
+  const resultSelect = entryForm.elements.result;
+  if (!resultSelect) return;
+  const formState = roundFormState(resultSelect.value);
+  dialogFields.querySelectorAll("[data-played-round-field]").forEach((field) => {
+    field.hidden = formState.isBye;
+  });
+  const playerInput = entryForm.elements.opponentPlayer;
+  const turnSelect = entryForm.elements.firstPlayer;
+  if (playerInput) playerInput.required = !formState.isBye;
+  if (turnSelect) turnSelect.required = formState.requiresTurn;
+  const note = dialogFields.querySelector("[data-bye-round-note]");
+  if (note) note.hidden = !formState.isBye;
 }
 
 function releaseDialogFocus() {
@@ -2262,10 +2294,11 @@ entryForm.addEventListener("submit", (event) => {
   }
 
   if (dialogMode === "match") {
-    const opponentPartnerColor = normalizePartnerColor(data.get("opponentPartnerColor"));
-    const opponentCaseCardId = selectedCaseCardId("opponentCaseCardName", opponentPartnerColor);
+    const formState = roundFormState(data.get("result"));
+    const opponentPartnerColor = formState.isBye ? "" : normalizePartnerColor(data.get("opponentPartnerColor"));
+    const opponentCaseCardId = formState.isBye ? "" : selectedCaseCardId("opponentCaseCardName", opponentPartnerColor);
     if (opponentCaseCardId === null) return;
-    const nextMatch = {
+    const nextMatch = sanitizeRoundRecord({
       id: crypto.randomUUID(),
       sessionId: route.sessionId,
       myDeck: data.get("myDeck").trim(),
@@ -2273,13 +2306,14 @@ entryForm.addEventListener("submit", (event) => {
       opponentPlayer: normalizePlayerName(data.get("opponentPlayer")),
       opponentPartnerColor,
       opponentCaseCardId,
-      result: data.get("result") || "pending",
+      roundType: formState.roundType,
+      result: formState.result,
       firstPlayer: data.get("firstPlayer"),
       opponentRps: data.get("opponentRps"),
       myPassed: data.get("myPassed"),
       opponentPassed: data.get("opponentPassed"),
       memo: data.get("memo").trim()
-    };
+    });
 
     if (editingMatchId) {
       state.matches = state.matches.map((match) => (
@@ -2522,6 +2556,8 @@ dialogFields.addEventListener("change", (event) => {
   if (partnerColorInput) {
     updateCaseCardPicker(partnerColorInput.dataset.partnerColorInput, partnerColorInput.value);
   }
+  const roundResult = event.target.closest("[data-round-result-select]");
+  if (roundResult) syncRoundFormFields();
   const placement = event.target.closest("[data-placement-select]");
   if (!placement) return;
   const prize = dialogFields.querySelector("input[name='randomPrizeWon']");
@@ -2858,7 +2894,7 @@ dialogFields.addEventListener("click", (event) => {
     if (!deck) return;
     const sessionCount = sessionsForDeck(deck.id).length;
     const matchCount = matchesForDeck(deck.id).length;
-    const confirmed = confirm(`「${deck.name}」を削除しますか？\n関連する${sessionCount}セッション、${matchCount}試合も削除されます。`);
+    const confirmed = confirm(`「${deck.name}」を削除しますか？\n関連する${sessionCount}セッション、${matchCount}ラウンドも削除されます。`);
     if (!confirmed) return;
     deleteDeck(deck.id);
     saveState();
@@ -2885,7 +2921,7 @@ dialogFields.addEventListener("click", (event) => {
     if (!session) return;
     const matchCount = matchesForSession(session.id).length;
     const deckId = session.deckId;
-    const confirmed = confirm(`「${session.name}」を削除しますか？\nこのセッションの${matchCount}試合も削除されます。`);
+    const confirmed = confirm(`「${session.name}」を削除しますか？\nこのセッションの${matchCount}ラウンドも削除されます。`);
     if (!confirmed) return;
     deleteSession(session.id);
     saveState();
@@ -4010,7 +4046,7 @@ function routeActionMarkup() {
       </div>
       <div class="danger-zone">
         <strong>このデッキ</strong>
-        <span>${sessionCount}セッション / ${matchCount}試合が紐づいています。</span>
+        <span>${sessionCount}セッション / ${matchCount}ラウンドが紐づいています。</span>
         <button class="danger-button" type="button" data-delete-current-deck="${deck.id}">デッキを削除</button>
       </div>
     `;
@@ -4023,7 +4059,7 @@ function routeActionMarkup() {
     return `
       <div class="danger-zone">
         <strong>このセッション</strong>
-        <span>${matchCount}試合が紐づいています。</span>
+        <span>${matchCount}ラウンドが紐づいています。</span>
         <button class="danger-button" type="button" data-delete-current-session="${session.id}">セッションを削除</button>
       </div>
     `;

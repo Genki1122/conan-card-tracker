@@ -55,6 +55,7 @@ export function buildXShareUrl(text) {
 }
 
 function opponentDeckLabel(match) {
+  if (match.roundType === "bye") return "不戦勝";
   const deckName = String(match.opponentDeck || "").trim();
   if (deckName && deckName !== "不明") return deckName;
   const caseCardName = getCaseCard(match.opponentCaseCardId)?.name;

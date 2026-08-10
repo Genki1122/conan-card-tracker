@@ -56,6 +56,25 @@ test("treats an explicitly unknown player as completed input", () => {
   );
 });
 
+test("does not ask users to repair opponent fields for bye rounds", () => {
+  const bye = {
+    roundType: "bye",
+    result: "win",
+    opponentPlayer: "",
+    opponentDeck: "",
+    opponentPartnerColor: "",
+    opponentCaseCardId: ""
+  };
+  const state = {
+    decks: [{ id: "d1" }],
+    sessions: [{ id: "s1", deckId: "d1", date: "2026-08-10" }],
+    matches: [{ id: "bye", sessionId: "s1", ...bye }]
+  };
+
+  assert.deepEqual(missingQualityFields(bye, {}, {}), []);
+  assert.deepEqual(buildRepairQueue(state), []);
+});
+
 test("quality rows expose affected users without identities from match content", () => {
   const rows = qualityRows([
     { userId: "u1", opponentPlayerRecorded: false, opponentDeck: "不明" },

@@ -27,10 +27,52 @@ import {
   getStaffRpsBreakdown,
   summarizeDecks,
   summarizeMatches,
+  summarizeRounds,
+  isByeRound,
+  isPlayedMatch,
+  isResolvedRound,
   isSmallSample,
   playerWinRateTone,
   sortPlayerOverviews
 } from "../src/analytics.js";
+
+describe("bye round boundaries", () => {
+  const rounds = [
+    { result: "win", roundType: "played", firstPlayer: "first", opponentDeck: "青単", myPassed: "none" },
+    { result: "win", roundType: "bye", firstPlayer: "", opponentDeck: "", myPassed: "pass1" },
+    { result: "loss", firstPlayer: "second", opponentDeck: "緑単", myPassed: "none" },
+    { result: "pending", roundType: "played", firstPlayer: "first", opponentDeck: "赤単" }
+  ];
+
+  it("counts a bye in official round results but excludes it from gameplay results", () => {
+    assert.deepEqual(
+      summarizeRounds(rounds),
+      {
+        total: 3,
+        wins: 2,
+        losses: 1,
+        winRate: 66.7,
+        first: { total: 1, wins: 1, losses: 0, draws: 0, winRate: 100 },
+        second: { total: 1, wins: 0, losses: 1, draws: 0, winRate: 0 },
+        currentStreak: { result: "loss", count: 1 }
+      }
+    );
+    assert.equal(summarizeMatches(rounds).total, 2);
+    assert.equal(summarizeMatches(rounds).winRate, 50);
+  });
+
+  it("classifies byes as resolved rounds rather than played matches", () => {
+    assert.equal(isByeRound(rounds[1]), true);
+    assert.equal(isResolvedRound(rounds[1]), true);
+    assert.equal(isPlayedMatch(rounds[1]), false);
+    assert.equal(isPlayedMatch(rounds[0]), true);
+  });
+
+  it("keeps byes out of opponent and pass analysis", () => {
+    assert.deepEqual(getOpponentBreakdown(rounds).map((row) => row.name), ["青単", "緑単"]);
+    assert.deepEqual(getMyPassUsage(rounds), { used: 0, total: 2, rate: 0 });
+  });
+});
 
 describe("color matchup matrix", () => {
   it("groups completed matches by both partner colors with turn and case-card details", () => {

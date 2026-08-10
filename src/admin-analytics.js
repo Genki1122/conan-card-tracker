@@ -1,4 +1,4 @@
-import { isCompletedMatch } from "./analytics.js";
+import { isByeRound, isCompletedMatch, isResolvedRound } from "./analytics.js";
 import { qualityRows } from "./data-quality.js";
 
 export function buildAdminOverview(input, now = new Date()) {
@@ -522,15 +522,17 @@ function buildDataQuality({ records, profiles, states, consentedUsers, now }) {
   const freshUserIds = new Set(states
     .filter((row) => new Date(row.updated_at).getTime() >= staleCutoff)
     .map((row) => row.user_id));
-  const total = records.length;
-  const fields = qualityRows(records);
+  const gameplayRecords = records.filter((record) => !isByeRound(record));
+  const total = gameplayRecords.length;
+  const fields = qualityRows(gameplayRecords);
   return {
     totalRecords: total,
-    completedMatches: records.filter(isCompletedMatch).length,
-    pendingMatches: records.filter((record) => !isCompletedMatch(record)).length,
+    completedMatches: gameplayRecords.filter(isCompletedMatch).length,
+    pendingMatches: gameplayRecords.filter((record) => !isResolvedRound(record)).length,
+    byeRounds: records.filter(isByeRound).length,
     staleUsers30d: Math.max(0, userIds.size - freshUserIds.size),
     aiEligibleUsers: consentedUsers.size,
-    aiEligibleMatches: records.filter((record) => consentedUsers.has(record.userId) && isCompletedMatch(record)).length,
+    aiEligibleMatches: gameplayRecords.filter((record) => consentedUsers.has(record.userId) && isCompletedMatch(record)).length,
     fields
   };
 }

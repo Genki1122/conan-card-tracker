@@ -2996,6 +2996,27 @@ button.pending-match-chip {
   background: var(--card);
 }
 
+.round-played-field {
+  display: contents;
+}
+
+[data-played-round-field][hidden],
+.bye-round-note[hidden] {
+  display: none;
+}
+
+.bye-round-note {
+  margin: 0;
+  border: 1px solid rgba(109, 77, 215, 0.45);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: rgba(109, 77, 215, 0.12);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .analysis-filter-panel summary,
 .session-result-fields summary,
 .match-extra-fields summary {

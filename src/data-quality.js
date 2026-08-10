@@ -9,6 +9,7 @@ export const qualityFields = [
 ];
 
 export function missingQualityFields(match = {}, session = {}, deck = {}) {
+  if (match.roundType === "bye") return [];
   return qualityFields
     .filter((field) => !isRecorded(field.key, {
       ...match,
