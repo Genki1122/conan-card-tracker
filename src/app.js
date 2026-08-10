@@ -40,7 +40,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=47";
+} from "./auth-challenge.js?v=48";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -49,7 +49,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=47";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=48";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -117,7 +117,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=47";
+} from "./cloud.js?v=48";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -2161,8 +2161,18 @@ function openDialog(mode, targetId = null) {
   if (!dialog.open) dialog.showModal();
 }
 
+function releaseDialogFocus() {
+  const focusedElement = document.activeElement;
+  if (focusedElement instanceof HTMLElement && dialog.contains(focusedElement)) {
+    focusedElement.blur();
+  }
+}
+
 entryForm.addEventListener("submit", (event) => {
-  if (event.submitter?.value === "cancel") return;
+  if (event.submitter?.value === "cancel") {
+    releaseDialogFocus();
+    return;
+  }
   event.preventDefault();
   if (adminPreview) return;
   const data = new FormData(entryForm);
@@ -2282,6 +2292,7 @@ entryForm.addEventListener("submit", (event) => {
 
   if (repairContext) route = repairContext.route;
   saveState();
+  releaseDialogFocus();
   dialog.close();
   entryForm.reset();
   render();
