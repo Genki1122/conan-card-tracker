@@ -22,6 +22,7 @@ test("the app shell and authentication modules use one deployment version", asyn
   }
 
   assert.match(serviceWorker, /src\/record-types\.js/);
+  assert.match(serviceWorker, /src\/matchup-detail\.js/);
 });
 
 test("the service worker bypasses the HTTP cache when checking for updates", async () => {

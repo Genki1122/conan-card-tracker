@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=50";
+} from "./auth-challenge.js?v=51";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -50,7 +50,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=50";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=51";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -111,6 +111,10 @@ import {
   replaceWithPlayerNameSuggestion
 } from "./player-names.js";
 import {
+  filterMatchupRecords,
+  passBadgeItems
+} from "./matchup-detail.js";
+import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
   deleteEnvironmentCatalogItem,
@@ -132,7 +136,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=50";
+} from "./cloud.js?v=51";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -207,6 +211,7 @@ let caseCardReturnFocus = null;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
+const resultFilterLabels = { all: "勝敗すべて", win: "勝ち", loss: "負け", draw: "引分" };
 const firstLabels = { first: "先攻", second: "後攻" };
 const passLabels = {
   none: "無し",
@@ -219,6 +224,18 @@ const passLabels = {
 };
 const placementLabels = { champion: "優勝", second: "2位", top4: "ベスト4", other: "その他" };
 const prizeMethodLabels = { rps: "じゃんけん", roulette: "ルーレット", other: "その他", unrecorded: "未記録" };
+const analysisPivotOptions = [
+  ["opponentDeck", "相手デッキ"],
+  ["opponentColor", "相手色"],
+  ["colorMatrix", "色対面表"],
+  ["myDeck", "自分デッキ"],
+  ["month", "月別"],
+  ["deckVersion", "バージョン"],
+  ["environment", "環境"],
+  ["store", "店舗"],
+  ["opponentPlayer", "プレイヤー"]
+];
+const drilldownPivots = new Set(analysisPivotOptions.map(([value]) => value).filter((value) => value !== "colorMatrix"));
 
 function loadState() {
   try {
@@ -765,8 +782,16 @@ function updatePlayerNameSuggestions(input) {
 }
 
 function setRoute(nextRoute) {
-  route = nextRoute;
+  const restoreScrollY = Number.isFinite(nextRoute?.restoreScrollY) ? nextRoute.restoreScrollY : null;
+  const restoreFocus = String(nextRoute?.restoreFocus || "");
+  route = { ...nextRoute };
+  delete route.restoreScrollY;
+  delete route.restoreFocus;
   render();
+  requestAnimationFrame(() => {
+    if (restoreScrollY !== null) window.scrollTo({ top: restoreScrollY, behavior: "auto" });
+    if (restoreFocus) document.querySelector(restoreFocus)?.focus({ preventScroll: true });
+  });
 }
 
 function getDeck(id) {
@@ -1117,14 +1142,15 @@ function renderSession(sessionId) {
         const isBye = match.roundType === "bye";
         return `
           <article class="round-card compact-round ${isBye ? "bye-round" : ""}">
-            <${adminPreview ? "div" : "button"} class="round-main" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
-              <span class="badge">${index + 1}</span>
-              <span>
-                <strong class="round-title">${isBye ? "不戦勝" : escapeHtml(match.opponentDeck)}</strong>
-                ${isBye ? "" : `<span class="round-meta"><span>${firstLabels[match.firstPlayer]}</span></span>`}
-              </span>
-              <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-            </${adminPreview ? "div" : "button"}>
+            ${historyRecordCardMarkup(match, {
+              className: "session-round-history-card",
+              primary: `<b class="round-history-number">${index + 1}</b><span>${isBye ? "不戦勝" : `${escapeHtml(match.opponentDeck || "デッキ未記録")}・${escapeHtml(normalizePlayerName(match.opponentPlayer))}`}</span>`,
+              secondary: isBye ? ["対戦なし"] : [
+                firstLabels[match.firstPlayer] || "先後未記録",
+                getCaseCard(match.opponentCaseCardId)?.name || "事件未記録",
+                `相手${rpsLabels[match.opponentRps] || "未記録"}`
+              ]
+            })}
             ${isBye ? "" : `
               <details class="round-extra">
                 <summary>詳細</summary>
@@ -1145,23 +1171,56 @@ function renderSession(sessionId) {
   `;
 }
 
+function resolveAnalysisContext(sourceRoute = route) {
+  const selectedRecordType = normalizeRecordType(sourceRoute.recordType, { allowAll: true });
+  const selectedDeckId = sourceRoute.deckId && getDeck(sourceRoute.deckId) ? sourceRoute.deckId : "";
+  const versions = selectedDeckId ? versionsForDeck(selectedDeckId, selectedRecordType) : [];
+  const selectedVersion = sourceRoute.version && versions.includes(sourceRoute.version) ? sourceRoute.version : "";
+  const environments = environmentsForDeck(selectedDeckId, selectedVersion, selectedRecordType);
+  const selectedEnvironment = sourceRoute.environment && environments.includes(sourceRoute.environment) ? sourceRoute.environment : "";
+  const stores = storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion, selectedRecordType);
+  const selectedStore = sourceRoute.store && stores.includes(sourceRoute.store) ? sourceRoute.store : "";
+  const months = analysisMonths(selectedRecordType);
+  const selectedMonth = sourceRoute.month && months.includes(sourceRoute.month) ? sourceRoute.month : "";
+  const selectedPivot = analysisPivotOptions.some(([value]) => value === sourceRoute.pivot) ? sourceRoute.pivot : "opponentDeck";
+  const selectedSort = ["total", "low", "high"].includes(sourceRoute.sort) ? sourceRoute.sort : "total";
+  return {
+    selectedRecordType,
+    selectedDeckId,
+    selectedVersion,
+    selectedEnvironment,
+    selectedStore,
+    selectedMonth,
+    selectedPivot,
+    selectedSort,
+    excludePasses: Boolean(sourceRoute.excludePasses),
+    minimumColorSamples: Boolean(sourceRoute.minimumColorSamples),
+    versions,
+    environments,
+    stores,
+    months
+  };
+}
+
 function renderSummary() {
   title.textContent = "分析";
-  const selectedRecordType = normalizeRecordType(route.recordType, { allowAll: true });
-  const selectedDeckId = route.deckId && getDeck(route.deckId) ? route.deckId : "";
+  const {
+    selectedRecordType,
+    selectedDeckId,
+    selectedVersion,
+    selectedEnvironment,
+    selectedStore,
+    selectedMonth,
+    selectedPivot,
+    selectedSort,
+    excludePasses,
+    minimumColorSamples,
+    versions,
+    environments,
+    stores,
+    months
+  } = resolveAnalysisContext();
   const deck = getDeck(selectedDeckId);
-  const versions = selectedDeckId ? versionsForDeck(selectedDeckId, selectedRecordType) : [];
-  const selectedVersion = route.version && versions.includes(route.version) ? route.version : "";
-  const environments = environmentsForDeck(selectedDeckId, selectedVersion, selectedRecordType);
-  const selectedEnvironment = route.environment && environments.includes(route.environment) ? route.environment : "";
-  const stores = storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion, selectedRecordType);
-  const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
-  const months = analysisMonths(selectedRecordType);
-  const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
-  const selectedPivot = ["opponentDeck", "opponentColor", "colorMatrix", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
-  const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
-  const excludePasses = Boolean(route.excludePasses);
-  const minimumColorSamples = Boolean(route.minimumColorSamples);
   const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion, selectedRecordType).filter(isCompletedMatch);
   const monthMatches = filterMatchesByMonth(baseMatches, selectedMonth);
   const matches = excludePasses ? filterMatchesWithoutPasses(monthMatches) : monthMatches;
@@ -1242,17 +1301,7 @@ function renderSummary() {
         : `<select data-analysis-sort aria-label="並び替え">${optionTags([["total", "試合数順"], ["low", "勝率低い順"], ["high", "勝率高い順"]], selectedSort)}</select>`}
     </div>
     <div class="deck-tabs filter-tabs" aria-label="集計軸">
-      ${[
-        ["opponentDeck", "相手デッキ"],
-        ["opponentColor", "相手色"],
-        ["colorMatrix", "色対面表"],
-        ["myDeck", "自分デッキ"],
-        ["month", "月別"],
-        ["deckVersion", "バージョン"],
-        ["environment", "環境"],
-        ["store", "店舗"],
-        ["opponentPlayer", "プレイヤー"]
-      ].map(([value, label]) => `
+      ${analysisPivotOptions.map(([value, label]) => `
         <button class="${value === selectedPivot ? "active" : ""}" type="button" data-analysis-pivot="${value}">${label}</button>
       `).join("")}
     </div>
@@ -1260,8 +1309,8 @@ function renderSummary() {
       ? personalColorMatchupMarkup(colorMatchups, selectedColorMatchup, minimumColorSamples)
       : `<div class="matchup-list">
           ${rows.map((row) => `
-            <details class="matchup-row">
-              <summary>
+            <button class="matchup-row" type="button" data-open-matchup="${escapeHtml(row.name)}">
+              <div class="matchup-row-summary">
                 <div>
                   <strong>${analysisRowName(row.name, selectedPivot)}</strong>
                   <span>${row.wins}勝 ${row.losses}敗 ${row.draws}分 / ${row.total}戦 ${sampleLabel(row.total)}</span>
@@ -1271,20 +1320,128 @@ function renderSummary() {
                   <b>${formatPercentage(row.winRate)}</b>
                   <div class="rps-track"><div class="progress-fill" style="width:${row.winRate}%"></div></div>
                 </div>
-              </summary>
-              <div class="matchup-detail">
-                <span>先攻 ${turnRecordText(row.first)}</span>
-                <span>後攻 ${turnRecordText(row.second)}</span>
-                <span>自分パス無 ${turnRecordText(row.myNoPass)}</span>
-                <span>自分パス有 ${turnRecordText(row.myAnyPass)}</span>
-                <span>相手パス無 ${turnRecordText(row.opponentNoPass)}</span>
-                <span>相手パス有 ${turnRecordText(row.opponentAnyPass)}</span>
-                ${selectedPivot === "opponentColor" ? colorCaseBreakdownMarkup(breakdownMatches, row.name) : ""}
-                ${selectedPivot === "store" ? `<button class="matchup-store-link" type="button" data-open-store="${escapeHtml(row.name)}">店舗アーカイブ</button>` : ""}
               </div>
-            </details>
+            </button>
           `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
         </div>`}
+  `;
+}
+
+function analysisMatchesForCurrentRoute() {
+  const {
+    selectedRecordType,
+    selectedDeckId,
+    selectedVersion,
+    selectedEnvironment,
+    selectedStore,
+    selectedMonth,
+    excludePasses
+  } = resolveAnalysisContext();
+  let matches = analysisMatchesForDeck(
+    selectedDeckId,
+    selectedEnvironment,
+    selectedStore,
+    selectedVersion,
+    selectedRecordType
+  ).filter(isCompletedMatch);
+  matches = filterMatchesByMonth(matches, selectedMonth);
+  if (excludePasses) matches = filterMatchesWithoutPasses(matches);
+  if (route.matchupPivot === "opponentPlayer") matches = matches.filter((match) => isKnownPlayerName(match.opponentPlayer));
+  if (route.matchupPivot === "opponentColor") matches = matches.filter((match) => match.opponentColor);
+  return matches;
+}
+
+function matchupDetailTitle(name, pivot) {
+  if (pivot === "month") return formatMonth(name);
+  return name || "未設定";
+}
+
+function passBadgesMarkup(match) {
+  return passBadgeItems(match).map((badge) => `
+    <span class="pass-badge ${badge.kind}">${escapeHtml(badge.label)}</span>
+  `).join("");
+}
+
+function historyRecordCardMarkup(match, { primary, secondary, className = "" } = {}) {
+  const tag = adminPreview ? "article" : "button";
+  return `
+    <${tag} class="match-history-card ${className}" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
+      <span class="match-history-topline">
+        <span class="match-history-primary">${primary}</span>
+        <span class="match-history-status">${passBadgesMarkup(match)}<span class="history-result ${match.result}">${escapeHtml(resultLabels[match.result] || "未確定")}</span></span>
+      </span>
+      <span class="match-history-secondary">
+        ${secondary.map((item, index) => `<span class="history-secondary-${index}">${escapeHtml(item)}</span>`).join("")}
+      </span>
+    </${tag}>
+  `;
+}
+
+function matchupHistoryCardMarkup(match, pivot) {
+  const player = normalizePlayerName(match.opponentPlayer);
+  const opponentContext = pivot === "opponentDeck"
+    ? player
+    : `${player}・${match.opponentDeck || "デッキ未記録"}`;
+  return historyRecordCardMarkup(match, {
+    className: "matchup-history-card",
+    primary: `<b>${escapeHtml(formatDate(match.date))}</b><span>${escapeHtml(opponentContext)}</span>`,
+    secondary: [
+      firstLabels[match.firstPlayer] || "先後未記録",
+      match.opponentCaseCard || "事件未記録",
+      match.store || "店舗未記録"
+    ]
+  });
+}
+
+function matchupSummaryButton(label, record, value, selected) {
+  return `
+    <button type="button" class="matchup-summary-button ${selected ? "active" : ""}" data-matchup-turn="${value}" aria-pressed="${selected}">
+      <span>${label}</span>
+      <strong>${formatPercentage(record.winRate)}</strong>
+      <small>${formatRecordSummary(record)}</small>
+    </button>
+  `;
+}
+
+function renderMatchupDetail() {
+  const pivot = drilldownPivots.has(route.matchupPivot) ? route.matchupPivot : "opponentDeck";
+  const name = String(route.matchupName || "未設定");
+  const result = ["win", "loss", "draw"].includes(route.matchupResult) ? route.matchupResult : "all";
+  const turn = ["first", "second"].includes(route.matchupTurn) ? route.matchupTurn : "all";
+  const allMatches = analysisMatchesForCurrentRoute();
+  const groupMatches = filterMatchupRecords(allMatches, { pivot, name });
+  const summary = summarizeMatches(groupMatches);
+  const turnMatches = turn === "all" ? groupMatches : groupMatches.filter((match) => match.firstPlayer === turn);
+  const visibleMatches = filterMatchupRecords(allMatches, { pivot, name, result, turn });
+  const resultCounts = {
+    all: turnMatches.length,
+    win: turnMatches.filter((match) => match.result === "win").length,
+    loss: turnMatches.filter((match) => match.result === "loss").length,
+    draw: turnMatches.filter((match) => match.result === "draw").length
+  };
+
+  title.textContent = matchupDetailTitle(name, pivot);
+  view.innerHTML = `
+    <section class="matchup-detail-overview">
+      <div class="matchup-summary-grid">
+        ${matchupSummaryButton("総合", summary, "all", turn === "all")}
+        ${matchupSummaryButton("先攻", summary.first, "first", turn === "first")}
+        ${matchupSummaryButton("後攻", summary.second, "second", turn === "second")}
+      </div>
+      <div class="matchup-result-tabs" role="tablist" aria-label="勝敗で絞り込み">
+        ${[
+          ["all", "すべて"],
+          ["win", "勝ち"],
+          ["loss", "負け"],
+          ...(summary.draws ? [["draw", "引分"]] : [])
+        ].map(([value, label]) => `<button type="button" role="tab" data-matchup-result="${value}" aria-selected="${result === value}" class="${result === value ? "active" : ""}">${label}<b>${resultCounts[value]}</b></button>`).join("")}
+      </div>
+      ${pivot === "store" ? `<button class="matchup-store-link compact" type="button" data-open-store="${escapeHtml(name)}">店舗アーカイブを見る</button>` : ""}
+    </section>
+    <div class="matchup-history-heading"><strong>${visibleMatches.length}試合</strong><span>${turn === "all" ? "先後すべて" : firstLabels[turn]}・${resultFilterLabels[result]}</span></div>
+    <div class="match-history-list">
+      ${visibleMatches.map((match) => matchupHistoryCardMarkup(match, pivot)).join("") || `<div class="empty-card">この条件に合う対戦記録はありません</div>`}
+    </div>
   `;
 }
 
@@ -1442,18 +1599,20 @@ function renderPlayers() {
         </details>
       `).join("") || `<div class="player-deck-empty"><strong>記録なし</strong><span>期間または環境を変更してください</span></div>`}</div>
       <h2 class="section-title">${escapeHtml(selected)}との履歴</h2>
-      <div class="list-stack player-history-list">
+      <div class="match-history-list player-history-list">
         ${enriched.map((match) => {
           const session = getSession(match.sessionId);
-          return `
-            <${adminPreview ? "article" : "button"} class="player-history-card" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
-              <span class="player-history-copy">
-                <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${playerColorDotMarkup(match.opponentPartnerColor)}${escapeHtml(match.opponentDeck)}</strong>
-                <span>${selectedPlayerRecordType === "all" ? `<i class="player-record-type-chip">${escapeHtml(recordTypeLabel(match.recordType))}</i>` : ""}${escapeHtml(session?.name || (selectedPlayerRecordType === "all" ? "" : recordTypeLabel(match.recordType)))}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
-              </span>
-              <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
-            </${adminPreview ? "article" : "button"}>
-          `;
+          return historyRecordCardMarkup(match, {
+            className: "player-match-history-card",
+            primary: `<b>${escapeHtml(formatDate(session?.date))}</b><span>${escapeHtml(match.myDeck)} vs ${playerColorDotMarkup(match.opponentPartnerColor)}${escapeHtml(match.opponentDeck)}</span>`,
+            secondary: [
+              firstLabels[match.firstPlayer] || "先後未記録",
+              match.opponentCaseCard || "事件未記録",
+              selectedPlayerRecordType === "all"
+                ? `${recordTypeLabel(match.recordType)}・${session?.name || "場所未記録"}`
+                : session?.name || recordTypeLabel(match.recordType)
+            ]
+          });
         }).join("")}
       </div>
     `;
@@ -1510,23 +1669,6 @@ function analysisRowName(name, pivot) {
   if (pivot !== "opponentColor") return escapeHtml(name);
   const color = partnerColors.find((item) => item.label === name);
   return `<span class="analysis-color-name"><i class="${color?.id || "unrecorded"}"></i>${escapeHtml(name)}</span>`;
-}
-
-function colorCaseBreakdownMarkup(matches, colorName) {
-  const colorMatches = matches.filter((match) => match.opponentColor === colorName);
-  const recordedMatches = colorMatches.filter((match) => match.opponentCaseCard);
-  const rows = sortCrossRows(getCrossBreakdown(recordedMatches, "opponentCaseCard"), "total");
-  return `
-    <div class="color-case-breakdown">
-      <div class="color-case-heading"><strong>事件カード別</strong><span>記録 ${recordedMatches.length}/${colorMatches.length}戦</span></div>
-      ${rows.map((row) => `
-        <div class="color-case-row">
-          <span>${escapeHtml(row.name)}</span>
-          <b>${row.wins}-${row.losses}${row.draws ? `-${row.draws}` : ""} / ${formatPercentage(row.winRate)}</b>
-        </div>
-      `).join("") || `<p>事件カードの記録はありません</p>`}
-    </div>
-  `;
 }
 
 function playerRpsMarkup(rps, compact = false) {
@@ -1992,18 +2134,19 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
-  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "admin", "recovery", "repair"].includes(route.name);
+  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "matchupDetail", "admin", "recovery", "repair"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
   phoneShell.classList.toggle("admin-preview-mode", Boolean(adminPreview));
   topBar.classList.toggle("root-header", !hasBackButton);
   backButton.style.visibility = hasBackButton ? "visible" : "hidden";
-  fabButton.hidden = Boolean(adminPreview) || ["summary", "players", "playerDetail", "storeDetail", "admin", "recovery", "repair"].includes(route.name) || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
+  fabButton.hidden = Boolean(adminPreview) || ["summary", "players", "playerDetail", "storeDetail", "matchupDetail", "admin", "recovery", "repair"].includes(route.name) || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
   if (route.name === "deckDetail") renderDeckDetail(route.deckId);
   if (route.name === "session") renderSession(route.sessionId);
   if (route.name === "summary") renderSummary();
+  if (route.name === "matchupDetail") renderMatchupDetail();
   if (route.name === "players" || route.name === "playerDetail") renderPlayers();
   if (route.name === "sessions") renderSessions();
   if (route.name === "storeDetail") renderStoreDetail(route.storeName);
@@ -2022,6 +2165,7 @@ function rootNavName() {
   if (route.name === "playerDetail") return "players";
   if (route.name === "storeDetail") return "sessions";
   if (route.name === "repair") return "summary";
+  if (route.name === "matchupDetail") return "summary";
   if (route.name === "recovery") return "decks";
   return route.name;
 }
@@ -2530,6 +2674,9 @@ view.addEventListener("click", (event) => {
   const editSessionButton = event.target.closest("[data-edit-session]");
   const analysisPivotButton = event.target.closest("[data-analysis-pivot]");
   const analysisColorMatchupButton = event.target.closest("[data-analysis-color-matchup]");
+  const matchupButton = event.target.closest("[data-open-matchup]");
+  const matchupResultButton = event.target.closest("[data-matchup-result]");
+  const matchupTurnButton = event.target.closest("[data-matchup-turn]");
   const renamePlayerButton = event.target.closest("[data-rename-player]");
   const playerDirectionButton = event.target.closest("[data-player-direction]");
   const playerRecordTypeTab = event.target.closest("[data-player-record-type-tab]");
@@ -2550,6 +2697,28 @@ view.addEventListener("click", (event) => {
   if (editSessionButton && !adminPreview) openDialog("session", editSessionButton.dataset.editSession);
   if (analysisPivotButton) setRoute(analysisRoute({ pivot: analysisPivotButton.dataset.analysisPivot, colorMatchup: "" }));
   if (analysisColorMatchupButton) setRoute(analysisRoute({ pivot: "colorMatrix", colorMatchup: analysisColorMatchupButton.dataset.analysisColorMatchup }));
+  if (matchupButton) {
+    const returnRoute = { ...route, restoreScrollY: window.scrollY };
+    setRoute({
+      ...route,
+      name: "matchupDetail",
+      matchupPivot: route.pivot || "opponentDeck",
+      matchupName: matchupButton.dataset.openMatchup,
+      matchupResult: "all",
+      matchupTurn: "all",
+      returnRoute
+    });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  if (matchupResultButton) {
+    const selectedResult = matchupResultButton.dataset.matchupResult;
+    setRoute({ ...route, matchupResult: selectedResult, restoreFocus: `[data-matchup-result="${selectedResult}"]` });
+  }
+  if (matchupTurnButton) {
+    const selectedTurn = matchupTurnButton.dataset.matchupTurn;
+    const nextTurn = route.matchupTurn === selectedTurn ? "all" : selectedTurn;
+    setRoute({ ...route, matchupTurn: nextTurn, restoreFocus: `[data-matchup-turn="${nextTurn}"]` });
+  }
   if (renamePlayerButton && !adminPreview) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
   if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
   if (playerRecordTypeTab) setRoute({
@@ -2560,7 +2729,11 @@ view.addEventListener("click", (event) => {
   if (deckViewButton) setRoute({ name: "decks", deckView: deckViewButton.dataset.deckView === "archived" ? "archived" : "active" });
   if (deckRecordTypeButton) setRoute({ ...route, name: "deckDetail", recordType: normalizeRecordType(deckRecordTypeButton.dataset.deckRecordType) });
   if (tournamentViewButton) setRoute({ name: "sessions", view: tournamentViewButton.dataset.tournamentView });
-  if (storeButton) setRoute({ name: "storeDetail", storeName: storeButton.dataset.openStore, returnRoute: route.name === "summary" ? { ...route } : null });
+  if (storeButton) setRoute({
+    name: "storeDetail",
+    storeName: storeButton.dataset.openStore,
+    returnRoute: ["summary", "matchupDetail"].includes(route.name) ? { ...route } : null
+  });
 });
 
 view.addEventListener("change", (event) => {
@@ -3264,6 +3437,7 @@ backButton.addEventListener("click", () => {
   }
   if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "", playerRecordType: normalizeRecordType(route.playerRecordType, { allowAll: true }) });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
+  if (route.name === "matchupDetail") setRoute(route.returnRoute || analysisRoute());
   if (route.name === "repair") setRoute({ name: "summary" });
   if (route.name === "recovery") setRoute({ name: "decks" });
   if (route.name === "admin") setRoute({ name: "decks" });
@@ -3829,10 +4003,6 @@ function recordCompact(record) {
   const losses = "losses" in record ? record.losses : record.total - record.wins;
   const draws = record.draws || 0;
   return draws ? `${record.wins}-${losses}-${draws}` : `${record.wins}-${losses}`;
-}
-
-function turnRecordText(record) {
-  return `${recordCompact(record)} / ${formatPercentage(record.winRate)}`;
 }
 
 function sampleLabel(total) {
