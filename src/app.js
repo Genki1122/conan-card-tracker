@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=51";
+} from "./auth-challenge.js?v=52";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -50,7 +50,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=51";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=52";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -136,7 +136,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=51";
+} from "./cloud.js?v=52";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -1387,6 +1387,7 @@ function matchupHistoryCardMarkup(match, pivot) {
     primary: `<b>${escapeHtml(formatDate(match.date))}</b><span>${escapeHtml(opponentContext)}</span>`,
     secondary: [
       firstLabels[match.firstPlayer] || "先後未記録",
+      `${match.myDeck || "デッキ未記録"} vs ${match.opponentDeck || "デッキ未記録"}`,
       match.opponentCaseCard || "事件未記録",
       match.store || "店舗未記録"
     ]

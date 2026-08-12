@@ -39,6 +39,20 @@ test("history cards share compact pass and result layout across user and admin v
   assert.match(styles, /\.pass-badge\.opponent/);
 });
 
+test("matchup history identifies both decks after the turn without adding another row", async () => {
+  const [appSource, styles] = await Promise.all([
+    readFile(new URL("src/app.js", rootUrl), "utf8"),
+    readFile(new URL("styles.css", rootUrl), "utf8")
+  ]);
+
+  assert.match(appSource, /`\$\{match\.myDeck \|\| "デッキ未記録"\} vs \$\{match\.opponentDeck \|\| "デッキ未記録"\}`/);
+  assert.match(appSource, /secondary:\s*\[\s*firstLabels\[match\.firstPlayer\][\s\S]*? vs /);
+  assert.doesNotMatch(appSource, /`自分: \$\{match\.myDeck/);
+  assert.match(styles, /\.matchup-history-card \.history-secondary-0/);
+  assert.match(styles, /\.matchup-history-card \.history-secondary-3/);
+  assert.match(styles, /\.matchup-history-card \.history-secondary-1::before\s*\{[^}]*content: " "/s);
+});
+
 test("summary and drilldown resolve the same effective analysis filters", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
   const uses = appSource.match(/resolveAnalysisContext\(\)/g) || [];

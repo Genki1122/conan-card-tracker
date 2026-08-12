@@ -1,4 +1,4 @@
-const CACHE_NAME = "conan-card-tracker-v51";
+const CACHE_NAME = "conan-card-tracker-v52";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,15 +8,15 @@ const ASSETS = [
   "./privacy.html",
   "./legal.css",
   "./styles.css",
-  "./src/app.js?v=51",
+  "./src/app.js?v=52",
   "./src/analytics.js",
   "./src/sync-state.js",
   "./src/onboarding.js",
   "./src/initial-state.js",
   "./src/admin-analytics.js",
   "./src/admin-view.js",
-  "./src/auth-feedback.js?v=51",
-  "./src/auth-challenge.js?v=51",
+  "./src/auth-feedback.js?v=52",
+  "./src/auth-challenge.js?v=52",
   "./src/account-storage.js",
   "./src/account-recovery.js",
   "./src/data-quality.js",
@@ -28,7 +28,7 @@ const ASSETS = [
   "./src/ime-input.js",
   "./src/player-names.js",
   "./src/matchup-detail.js",
-  "./src/cloud.js?v=51",
+  "./src/cloud.js?v=52",
   "./src/supabase-config.js?v=2",
   "./manifest.webmanifest",
   "./icon-192.png",

@@ -825,6 +825,29 @@ article.match-history-card {
   max-width: 38%;
 }
 
+.matchup-history-card .history-secondary-0 {
+  flex: 0 0 auto;
+}
+
+.matchup-history-card .history-secondary-1 {
+  flex: 0 1 42%;
+  max-width: 42%;
+}
+
+.matchup-history-card .history-secondary-1::before {
+  content: " ";
+}
+
+.matchup-history-card .history-secondary-2 {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.matchup-history-card .history-secondary-3 {
+  flex: 1 2 24%;
+  max-width: 30%;
+}
+
 .list-stack {
   display: grid;
   gap: 14px;
