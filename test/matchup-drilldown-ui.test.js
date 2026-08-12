@@ -50,7 +50,8 @@ test("matchup history identifies both decks after the turn without adding anothe
   assert.doesNotMatch(appSource, /`自分: \$\{match\.myDeck/);
   assert.match(styles, /\.matchup-history-card \.history-secondary-0/);
   assert.match(styles, /\.matchup-history-card \.history-secondary-3/);
-  assert.match(styles, /\.matchup-history-card \.history-secondary-1::before\s*\{[^}]*content: " "/s);
+  assert.match(styles, /\.matchup-history-card \.history-secondary-1\s*\{[^}]*margin-left: 6px/s);
+  assert.match(styles, /\.matchup-history-card \.history-secondary-1::before\s*\{[^}]*content: ""/s);
 });
 
 test("summary and drilldown resolve the same effective analysis filters", async () => {

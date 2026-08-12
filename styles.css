@@ -832,10 +832,11 @@ article.match-history-card {
 .matchup-history-card .history-secondary-1 {
   flex: 0 1 42%;
   max-width: 42%;
+  margin-left: 6px;
 }
 
 .matchup-history-card .history-secondary-1::before {
-  content: " ";
+  content: "";
 }
 
 .matchup-history-card .history-secondary-2 {
