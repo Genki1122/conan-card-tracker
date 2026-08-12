@@ -1,5 +1,6 @@
 import { isByeRound, isCompletedMatch, isResolvedRound } from "./analytics.js";
 import { qualityRows } from "./data-quality.js";
+import { normalizeRecordType } from "./record-types.js";
 
 export function buildAdminOverview(input, now = new Date()) {
   const profiles = input.profiles || [];
@@ -60,9 +61,12 @@ export function buildAdminDashboard(input, filters = {}, now = new Date()) {
   const selectedStates = states.filter((row) => selectedUser(row.user_id));
   const selectedProfiles = profiles.filter((row) => selectedUser(row.user_id));
   const { records: allRecords, sessions: allSessions } = flattenAdminData(selectedStates);
+  const recordTypeSessions = allSessions.filter((session) => (
+    requestedFilters.recordType === "all" || session.recordType === requestedFilters.recordType
+  ));
   const filterOptions = {
-    months: uniqueSorted(allSessions.map((session) => session.month), true),
-    environments: uniqueSorted(allSessions.map((session) => session.environment))
+    months: uniqueSorted(recordTypeSessions.map((session) => session.month), true),
+    environments: uniqueSorted(recordTypeSessions.map((session) => session.environment))
   };
   const normalizedFilters = {
     ...requestedFilters,
@@ -151,7 +155,8 @@ export function buildAiTrainingDataset(input) {
         opponentRps: match.opponentRps || "unknown",
         myPassed: match.myPassed || "none",
         opponentPassed: match.opponentPassed || "none",
-        environment: sessions.get(match.sessionId)?.environment || "未設定"
+        environment: sessions.get(match.sessionId)?.environment || "未設定",
+        recordType: normalizeRecordType(sessions.get(match.sessionId)?.recordType)
       }));
     });
 }
@@ -223,6 +228,7 @@ function normalizeAdminFilters(filters) {
   return {
     month: String(filters.month || "").trim(),
     environment: String(filters.environment || "").trim(),
+    recordType: normalizeRecordType(filters.recordType, { allowAll: true }),
     excludePasses: Boolean(filters.excludePasses),
     consentedOnly: Boolean(filters.consentedOnly)
   };
@@ -239,6 +245,7 @@ function flattenAdminData(states) {
       const date = String(session.date || "");
       const enriched = {
         ...session,
+        recordType: normalizeRecordType(session.recordType),
         userId: stateRow.user_id,
         month: date.slice(0, 7),
         environment: String(session.environment || "未設定"),
@@ -258,6 +265,7 @@ function flattenAdminData(states) {
         date: session.date || "",
         month: session.month || "",
         environment: session.environment || "未設定",
+        recordType: normalizeRecordType(session.recordType),
         myPartnerColor: session.myPartnerColor || "",
         myCaseCardId: session.myCaseCardId || "",
         opponentPartnerColor: match.opponentPartnerColor || "",
@@ -270,6 +278,7 @@ function flattenAdminData(states) {
 }
 
 function inAdminContext(record, filters) {
+  if (filters.recordType !== "all" && record.recordType !== filters.recordType) return false;
   if (filters.month && record.month !== filters.month) return false;
   if (filters.environment && record.environment !== filters.environment) return false;
   return true;

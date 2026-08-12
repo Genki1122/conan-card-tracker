@@ -3,8 +3,16 @@ import assert from "node:assert/strict";
 
 import {
   buildSessionShareText,
-  buildXShareUrl
+  buildXShareUrl,
+  isSessionShareAvailable
 } from "../src/session-share.js";
+
+test("X sharing is available only for challenge sessions", () => {
+  assert.equal(isSessionShareAvailable({}), true);
+  assert.equal(isSessionShareAvailable({ recordType: "challenge" }), true);
+  assert.equal(isSessionShareAvailable({ recordType: "free" }), false);
+  assert.equal(isSessionShareAvailable({ recordType: "tuning" }), false);
+});
 
 test("builds a compact aligned X post from a completed session", () => {
   const text = buildSessionShareText({

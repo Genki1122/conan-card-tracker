@@ -20,6 +20,8 @@ test("the app shell and authentication modules use one deployment version", asyn
     assert.match(appSource, new RegExp(`\\./${moduleName}\\.js\\?v=${appVersion}`));
     assert.match(serviceWorker, new RegExp(`src/${moduleName}\\.js\\?v=${appVersion}`));
   }
+
+  assert.match(serviceWorker, /src\/record-types\.js/);
 });
 
 test("the service worker bypasses the HTTP cache when checking for updates", async () => {

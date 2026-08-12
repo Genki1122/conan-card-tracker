@@ -2,6 +2,7 @@ import {
   getCaseCard,
   partnerColorLabel
 } from "./card-catalog.js";
+import { normalizeRecordType } from "./record-types.js";
 
 const placementLabels = {
   champion: "優勝",
@@ -19,6 +20,10 @@ const resultLabels = {
   loss: "× ",
   draw: "△"
 };
+
+export function isSessionShareAvailable(session = {}) {
+  return normalizeRecordType(session.recordType) === "challenge";
+}
 
 export function buildSessionShareText({ session = {}, deck = {}, matches = [] } = {}) {
   const completedMatches = matches.filter((match) => resultLabels[match.result]);

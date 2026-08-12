@@ -277,6 +277,63 @@ button {
   font-weight: 900;
 }
 
+.deck-type-record-strip {
+  grid-template-columns: minmax(0, 1.25fr) repeat(3, minmax(0, 0.9fr));
+  gap: 8px;
+}
+
+.deck-type-record-strip > div strong {
+  overflow: hidden;
+  font-size: 1.05rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-type-record-strip > div:last-child {
+  text-align: right;
+}
+
+.record-type-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border-radius: 12px;
+  background: #17141d;
+}
+
+.record-type-tabs button {
+  min-width: 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.record-type-tabs button.active {
+  background: var(--card-2);
+  color: var(--text);
+}
+
+.record-type-tabs.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.record-type-tabs.four button {
+  font-size: 0.68rem;
+}
+
+.session-type-chip {
+  border: 1px solid rgba(159, 118, 255, 0.5);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--purple);
+}
+
 .section-title {
   margin: 22px 2px 12px;
   font-size: 1.16rem;
@@ -1084,6 +1141,66 @@ button {
   gap: 12px;
 }
 
+.session-record-type-field {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.session-record-type-field legend {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.session-record-type-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  background: #17141d;
+}
+
+.session-record-type-options label {
+  position: relative;
+  display: block;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.session-record-type-options input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session-record-type-options span {
+  display: grid;
+  place-items: center;
+  min-height: 40px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.session-record-type-options input:checked + span {
+  background: var(--card-2);
+  color: var(--text);
+}
+
+.session-record-type-options input:focus-visible + span {
+  outline: 2px solid var(--purple);
+  outline-offset: -2px;
+}
+
+[data-challenge-session-field][hidden] {
+  display: none;
+}
+
 .player-name-field {
   position: relative;
   display: grid;
@@ -1401,6 +1518,10 @@ label {
   padding: 8px;
   border-radius: 8px;
   background: var(--card);
+}
+
+.admin-filter-bar.with-record-type {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .admin-filter-bar label {
@@ -3549,6 +3670,25 @@ button.pending-match-chip {
   margin: -2px 0 10px;
 }
 
+.player-context-filters.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.player-context-filters.three label {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.player-context-filters.three span {
+  padding-left: 2px;
+  font-size: 0.62rem;
+}
+
+.player-context-filters.three select {
+  padding-inline: 7px;
+  font-size: 0.7rem;
+}
+
 .player-context-filters label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3760,6 +3900,22 @@ button.pending-match-chip {
   color: var(--muted);
   font-size: 1rem;
   font-weight: 900;
+}
+
+.player-record-type-tabs {
+  margin-bottom: 10px;
+}
+
+.player-record-type-chip {
+  display: inline-block;
+  margin-right: 5px;
+  border: 1px solid rgba(159, 118, 255, 0.45);
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: var(--purple);
+  font-size: 0.56rem;
+  font-style: normal;
+  line-height: 1.2;
 }
 
 .player-pending-summary {

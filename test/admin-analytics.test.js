@@ -57,10 +57,46 @@ test("AI dataset excludes identities and free-form notes", () => {
   const dataset = buildAiTrainingDataset(input);
 
   assert.equal(dataset.length, 2);
-  assert.deepEqual(Object.keys(dataset[0]).sort(), ["environment", "firstPlayer", "myDeck", "myPassed", "opponentDeck", "opponentPassed", "opponentRps", "result"].sort());
+  assert.deepEqual(Object.keys(dataset[0]).sort(), ["environment", "firstPlayer", "myDeck", "myPassed", "opponentDeck", "opponentPassed", "opponentRps", "recordType", "result"].sort());
   assert.equal(JSON.stringify(dataset).includes("秘密"), false);
   assert.equal(JSON.stringify(dataset).includes("個人メモ"), false);
   assert.equal(dataset.some((row) => row.myDeck === "鬼丸剣道"), true);
+  assert.equal(dataset.every((row) => row.recordType === "challenge"), true);
+});
+
+test("admin dashboard defaults to challenge and can filter other record types", () => {
+  const typedInput = {
+    profiles: [{ user_id: "u1", username: "利用者" }],
+    consents: [{ user_id: "u1", accepted_at: "2026-07-01T00:00:00Z" }],
+    states: [{
+      user_id: "u1",
+      updated_at: "2026-07-20T00:00:00Z",
+      data: {
+        decks: [{ id: "d1", name: "デッキ" }],
+        sessions: [
+          { id: "challenge", deckId: "d1", date: "2026-07-01", environment: "10弾環境" },
+          { id: "free", deckId: "d1", date: "2026-07-02", environment: "10弾環境", recordType: "free" }
+        ],
+        matches: [
+          { sessionId: "challenge", result: "win" },
+          { sessionId: "free", result: "loss" }
+        ]
+      }
+    }]
+  };
+
+  const challenge = buildAdminDashboard(typedInput);
+  const free = buildAdminDashboard(typedInput, { recordType: "free" });
+  const all = buildAdminDashboard(typedInput, { recordType: "all" });
+  const dataset = buildAiTrainingDataset(typedInput);
+
+  assert.equal(challenge.filters.recordType, "challenge");
+  assert.equal(challenge.summary.matches, 1);
+  assert.equal(challenge.summary.winRate, 100);
+  assert.equal(free.summary.matches, 1);
+  assert.equal(free.summary.winRate, 0);
+  assert.equal(all.summary.matches, 2);
+  assert.deepEqual(dataset.map((row) => row.recordType), ["challenge", "free"]);
 });
 
 test("registered users remain visible before creating their first record", () => {

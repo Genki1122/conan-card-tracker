@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=49";
+} from "./auth-challenge.js?v=50";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -50,7 +50,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=49";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=50";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -89,7 +89,8 @@ import {
 } from "./card-catalog.js";
 import {
   buildSessionShareText,
-  buildXShareUrl
+  buildXShareUrl,
+  isSessionShareAvailable
 } from "./session-share.js";
 import {
   matchResultSelection,
@@ -97,6 +98,13 @@ import {
   roundFormState,
   sanitizeRoundRecord
 } from "./rounds.js";
+import {
+  filterMatchesByRecordType,
+  filterSessionsByRecordType,
+  normalizeRecordType,
+  recordTypeLabel,
+  sanitizeSessionForRecordType
+} from "./record-types.js";
 import { shouldUpdateSearchFromInput } from "./ime-input.js";
 import {
   filterPlayerNameSuggestions,
@@ -124,7 +132,7 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=49";
+} from "./cloud.js?v=50";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
@@ -526,8 +534,9 @@ function normalizeState(rawState) {
   const sessionEnvironments = (rawState.sessions || []).map((session) => normalizeEnvironmentName(session.environment));
   return {
     decks,
-    sessions: rawSessions.map((session) => ({
+    sessions: rawSessions.map((session) => sanitizeSessionForRecordType({
       ...session,
+      recordType: normalizeRecordType(session.recordType),
       environment: normalizeEnvironmentName(session.environment),
       deckVersion: session.deckVersion || deckVersions.get(session.deckId) || "v1",
       partnerColor: normalizePartnerColor(session.partnerColor),
@@ -570,6 +579,7 @@ function migrateLegacyMatches(matches) {
   const sessions = decks.map((deck) => ({
     id: crypto.randomUUID(),
     deckId: deck.id,
+    recordType: "challenge",
     deckVersion: deck.version,
     partnerColor: "",
     caseCardId: "",
@@ -790,6 +800,7 @@ function enrichMatches(matches) {
     const deck = getDeck(session?.deckId);
     return {
       ...match,
+      recordType: normalizeRecordType(session?.recordType),
       environment: session?.environment || "未設定",
       deckVersion: session?.deckVersion || "v1",
       store: session?.name || "未設定",
@@ -802,21 +813,22 @@ function enrichMatches(matches) {
   });
 }
 
-function analysisMatchesForDeck(deckId, environment = "", store = "", deckVersion = "") {
+function analysisMatchesForDeck(deckId, environment = "", store = "", deckVersion = "", recordType = "challenge") {
   const sessions = state.sessions.filter((session) => (
     (!deckId || session.deckId === deckId)
     &&
     (!environment || session.environment === environment)
     && (!store || session.name === store)
     && (!deckVersion || session.deckVersion === deckVersion)
+    && (normalizeRecordType(recordType, { allowAll: true }) === "all" || normalizeRecordType(session.recordType) === normalizeRecordType(recordType))
   ));
   const ids = new Set(sessions.map((session) => session.id));
   return enrichMatches(state.matches.filter((match) => ids.has(match.sessionId)));
 }
 
-function storesForDeck(deckId, environment = "", deckVersion = "") {
+function storesForDeck(deckId, environment = "", deckVersion = "", recordType = "challenge") {
   return uniqueValues(
-    state.sessions
+    filterSessionsByRecordType(state.sessions, recordType)
       .filter((session) => !deckId || session.deckId === deckId)
       .filter((session) => !environment || session.environment === environment)
       .filter((session) => !deckVersion || session.deckVersion === deckVersion)
@@ -824,15 +836,16 @@ function storesForDeck(deckId, environment = "", deckVersion = "") {
   );
 }
 
-function versionsForDeck(deckId) {
+function versionsForDeck(deckId, recordType = "challenge") {
   if (!deckId) return [];
-  return uniqueValues(sessionsForDeck(deckId).map((session) => session.deckVersion || "v1"));
+  return uniqueValues(filterSessionsByRecordType(sessionsForDeck(deckId), recordType).map((session) => session.deckVersion || "v1"));
 }
 
-function analysisMonths() {
+function analysisMonths(recordType = "all") {
   const current = relativeMonth(0);
   const previous = relativeMonth(-1);
-  return uniqueValues([current, previous, ...state.sessions.map((session) => String(session.date || "").slice(0, 7))]).sort().reverse();
+  const sessions = filterSessionsByRecordType(state.sessions, recordType);
+  return uniqueValues([current, previous, ...sessions.map((session) => String(session.date || "").slice(0, 7))]).sort().reverse();
 }
 
 function relativeMonth(offset) {
@@ -876,9 +889,9 @@ function matchesForDeckInEnvironment(deckId, environment) {
   return state.matches.filter((match) => ids.has(match.sessionId));
 }
 
-function environmentsForDeck(deckId, deckVersion = "") {
+function environmentsForDeck(deckId, deckVersion = "", recordType = "challenge") {
   return uniqueValues(
-    state.sessions
+    filterSessionsByRecordType(state.sessions, recordType)
       .filter((session) => !deckId || session.deckId === deckId)
       .filter((session) => !deckVersion || session.deckVersion === deckVersion)
       .map((session) => session.environment || "未設定")
@@ -911,7 +924,9 @@ function sessionCardStatus(session, summary) {
 }
 
 function sessionsForStore(storeName) {
-  return sortSessionsNewestFirst(state.sessions.filter((session) => session.name === storeName));
+  return sortSessionsNewestFirst(
+    filterSessionsByRecordType(state.sessions, "challenge").filter((session) => session.name === storeName)
+  );
 }
 
 function sessionRecord(sessionId) {
@@ -987,14 +1002,28 @@ function recordStrip(summary, meta = [], badge = "", extraMetric = null) {
   `;
 }
 
+function deckTypeRecordStrip(summary, passUsage) {
+  return `
+    <section class="record-strip deck-type-record-strip">
+      <div><span>戦績</span><strong>${recordText(summary)}</strong></div>
+      <div><span>勝率</span><strong>${formatPercentage(summary.winRate)}</strong></div>
+      <div><span>パス率</span><strong>${formatPercentage(passUsage.rate)}</strong></div>
+      <div><span>試合数</span><strong>${summary.total}</strong></div>
+    </section>
+  `;
+}
+
 function renderDecks() {
   title.textContent = "デッキ選択";
   const archivedView = route.deckView === "archived";
   const visibleIds = new Set(filterDecksByArchived(state.decks, archivedView).map((deck) => deck.id));
-  const visibleSessions = state.sessions.filter((session) => visibleIds.has(session.deckId));
+  const visibleSessions = filterSessionsByRecordType(
+    state.sessions.filter((session) => visibleIds.has(session.deckId)),
+    "challenge"
+  );
   const visibleSessionIds = new Set(visibleSessions.map((session) => session.id));
   const visibleMatches = state.matches.filter((match) => visibleSessionIds.has(match.sessionId));
-  const decks = summarizeDecks(state.decks, state.sessions, state.matches)
+  const decks = summarizeDecks(state.decks, visibleSessions, visibleMatches)
     .filter((deck) => visibleIds.has(deck.id))
     .sort((a, b) => deckRecency(getDeck(b.id)).localeCompare(deckRecency(getDeck(a.id))));
   const overall = summarizeMatches(visibleMatches);
@@ -1024,19 +1053,24 @@ function renderDecks() {
 function renderDeckDetail(deckId) {
   const deck = getDeck(deckId);
   if (!deck) return setRoute({ name: "decks" });
-  const deckSessions = sortSessionsNewestFirst(sessionsForDeck(deckId));
-  const deckMatches = matchesForDeck(deckId);
+  const selectedRecordType = normalizeRecordType(route.recordType);
+  const deckSessions = sortSessionsNewestFirst(
+    filterSessionsByRecordType(sessionsForDeck(deckId), selectedRecordType)
+  );
+  const deckMatches = filterMatchesByRecordType(enrichMatches(matchesForDeck(deckId)), selectedRecordType);
   const summary = summarizeMatches(deckMatches);
   const passUsage = getMyPassUsage(deckMatches);
 
   title.textContent = deck.name;
   view.innerHTML = `
-    ${recordStrip(
-      summary,
-      [escapeHtml(deck.version || "v1"), `${deckSessions.length}大会`, `${summary.total}試合`],
-      deck.archived ? "アーカイブ" : "",
-      { label: "パス率", value: formatPercentage(passUsage.rate) }
-    )}
+    ${deckTypeRecordStrip(summary, passUsage)}
+    <div class="record-type-tabs" role="tablist" aria-label="記録種別">
+      ${[
+        ["challenge", "チャレンジ"],
+        ["free", "フリー"],
+        ["tuning", "調整"]
+      ].map(([value, label]) => `<button type="button" role="tab" data-deck-record-type="${value}" aria-selected="${selectedRecordType === value}" class="${selectedRecordType === value ? "active" : ""}">${label}</button>`).join("")}
+    </div>
     <div class="list-stack compact-session-list">
       ${deckSessions.map((session) => {
         const count = matchesForSession(session.id).length;
@@ -1044,7 +1078,7 @@ function renderDeckDetail(deckId) {
         return `
           <button class="list-card compact-session-card" type="button" data-open-session="${session.id}">
             <span class="session-card-copy">
-              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name)}</strong></span>
+              <span class="session-title-line"><strong class="list-title">${escapeHtml(session.name || recordTypeLabel(session.recordType))}</strong></span>
               <span class="list-meta"><span>${formatDate(session.date)}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${count}ラウンド</span></span>
             </span>
             ${sessionCardStatus(session, summary)}
@@ -1064,18 +1098,18 @@ function renderSession(sessionId) {
   const deck = getDeck(session.deckId);
   const shareUrl = buildXShareUrl(buildSessionShareText({ session, deck, matches: rounds }));
 
-  title.textContent = session.name;
+  title.textContent = session.name || recordTypeLabel(session.recordType);
   view.innerHTML = `
     <section class="session-compact-head">
       <div class="session-record"><span>戦績</span><strong>${recordText(summary)}</strong><b>${summary.winRate}%</b>${pendingRounds.length ? `<${adminPreview ? "span" : "button"} class="pending-match-chip" ${adminPreview ? "" : `type="button" data-open-pending-match="${pendingRounds[0].id}"`}>未確定 ${pendingRounds.length}</${adminPreview ? "span" : "button"}>` : ""}</div>
       ${adminPreview ? `<span class="read-only-badge">閲覧専用</span>` : `
         <div class="session-head-actions">
           <button type="button" data-edit-session="${session.id}">編集</button>
-          <a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" data-session-share data-pending-count="${pendingRounds.length}" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>
+          ${isSessionShareAvailable(session) ? `<a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" data-session-share data-pending-count="${pendingRounds.length}" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>` : ""}
         </div>
       `}
-      <p><span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
-      ${(session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
+      <p>${normalizeRecordType(session.recordType) === "challenge" || !session.name ? "" : `<span class="session-type-chip">${escapeHtml(recordTypeLabel(session.recordType))}</span>`}<span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
+      ${isSessionShareAvailable(session) && (session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
     </section>
     <div class="section-title-row"><h2>ラウンド</h2><span>${rounds.length}ラウンド</span></div>
     <div class="list-stack">
@@ -1113,21 +1147,22 @@ function renderSession(sessionId) {
 
 function renderSummary() {
   title.textContent = "分析";
+  const selectedRecordType = normalizeRecordType(route.recordType, { allowAll: true });
   const selectedDeckId = route.deckId && getDeck(route.deckId) ? route.deckId : "";
   const deck = getDeck(selectedDeckId);
-  const versions = selectedDeckId ? versionsForDeck(selectedDeckId) : [];
+  const versions = selectedDeckId ? versionsForDeck(selectedDeckId, selectedRecordType) : [];
   const selectedVersion = route.version && versions.includes(route.version) ? route.version : "";
-  const environments = environmentsForDeck(selectedDeckId, selectedVersion);
+  const environments = environmentsForDeck(selectedDeckId, selectedVersion, selectedRecordType);
   const selectedEnvironment = route.environment && environments.includes(route.environment) ? route.environment : "";
-  const stores = storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion);
+  const stores = storesForDeck(selectedDeckId, selectedEnvironment, selectedVersion, selectedRecordType);
   const selectedStore = route.store && stores.includes(route.store) ? route.store : "";
-  const months = analysisMonths();
+  const months = analysisMonths(selectedRecordType);
   const selectedMonth = route.month && months.includes(route.month) ? route.month : "";
   const selectedPivot = ["opponentDeck", "opponentColor", "colorMatrix", "myDeck", "month", "deckVersion", "environment", "store", "opponentPlayer"].includes(route.pivot) ? route.pivot : "opponentDeck";
   const selectedSort = ["total", "low", "high"].includes(route.sort) ? route.sort : "total";
   const excludePasses = Boolean(route.excludePasses);
   const minimumColorSamples = Boolean(route.minimumColorSamples);
-  const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion).filter(isCompletedMatch);
+  const baseMatches = analysisMatchesForDeck(selectedDeckId, selectedEnvironment, selectedStore, selectedVersion, selectedRecordType).filter(isCompletedMatch);
   const monthMatches = filterMatchesByMonth(baseMatches, selectedMonth);
   const matches = excludePasses ? filterMatchesWithoutPasses(monthMatches) : monthMatches;
   const summary = summarizeMatches(matches);
@@ -1164,8 +1199,9 @@ function renderSummary() {
     </div>
     <div class="analysis-secondary-filters">
       <details class="analysis-filter-panel">
-        <summary>詳細条件${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length ? ` ${[selectedVersion, selectedEnvironment, selectedStore].filter(Boolean).length}` : ""}</summary>
+        <summary>詳細条件${[selectedVersion, selectedEnvironment, selectedStore, selectedRecordType === "challenge" ? "" : selectedRecordType].filter(Boolean).length ? ` ${[selectedVersion, selectedEnvironment, selectedStore, selectedRecordType === "challenge" ? "" : selectedRecordType].filter(Boolean).length}` : ""}</summary>
         <div class="analysis-filter-grid">
+          <label>記録種別<select data-analysis-record-type>${optionTags([["challenge", "チャレンジ戦"], ["free", "フリー対戦"], ["tuning", "調整対戦"], ["all", "すべて"]], selectedRecordType)}</select></label>
           <label>バージョン<select data-analysis-version-select ${selectedDeckId ? "" : "disabled"}><option value="">すべて</option>${versions.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedVersion ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
           <label>環境<select data-analysis-environment-select><option value="">すべて</option>${environments.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedEnvironment ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
           <label>店舗<select data-analysis-store-select><option value="">すべて</option>${stores.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedStore ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></label>
@@ -1357,11 +1393,13 @@ function matchupCaseCardDetail(item) {
 function renderPlayers() {
   title.textContent = "プレイヤー";
   const selected = route.playerName;
-  const months = analysisMonths();
+  const selectedPlayerRecordType = normalizeRecordType(route.playerRecordType, { allowAll: true });
+  const recordTypeMatches = filterMatchesByRecordType(enrichMatches(state.matches), selectedPlayerRecordType);
+  const months = analysisMonths(selectedPlayerRecordType);
   const selectedMonth = route.playerMonth && months.includes(route.playerMonth) ? route.playerMonth : "";
-  const environments = environmentOptions();
+  const environments = uniqueValues(recordTypeMatches.map((match) => match.environment));
   const selectedEnvironment = route.playerEnvironment && environments.includes(route.playerEnvironment) ? route.playerEnvironment : "";
-  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(enrichMatches(state.matches), selectedMonth), selectedEnvironment);
+  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(recordTypeMatches, selectedMonth), selectedEnvironment);
 
   if (selected) {
     title.textContent = selected;
@@ -1374,11 +1412,14 @@ function renderPlayers() {
     const deckRows = getPlayerDeckOverviews(enriched);
     view.innerHTML = `
       <div class="player-detail-period">
-        <span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}</span>
+        <span>${selectedMonth ? formatMonth(selectedMonth) : "全期間"}・${escapeHtml(selectedEnvironment || "全環境")}・${escapeHtml(recordTypeLabel(selectedPlayerRecordType))}</span>
         <span class="player-detail-period-actions">
           <strong>${recordCountLabel}</strong>
           ${adminPreview ? "" : `<button type="button" data-rename-player="${escapeHtml(selected)}" aria-label="名前を変更" title="名前を変更">✎</button>`}
         </span>
+      </div>
+      <div class="record-type-tabs four player-record-type-tabs" role="tablist" aria-label="記録種別">
+        ${[["challenge", "チャレンジ"], ["free", "フリー"], ["tuning", "調整"], ["all", "すべて"]].map(([value, label]) => `<button type="button" role="tab" data-player-record-type-tab="${value}" aria-selected="${selectedPlayerRecordType === value}" class="${selectedPlayerRecordType === value ? "active" : ""}">${label}</button>`).join("")}
       </div>
       ${record.total
         ? summaryCard(record, [`最終 ${formatDate(latest?.date)}`], true)
@@ -1408,7 +1449,7 @@ function renderPlayers() {
             <${adminPreview ? "article" : "button"} class="player-history-card" ${adminPreview ? "" : `type="button" data-edit-match="${match.id}"`}>
               <span class="player-history-copy">
                 <strong>${formatDate(session?.date)}　${escapeHtml(match.myDeck)} vs ${playerColorDotMarkup(match.opponentPartnerColor)}${escapeHtml(match.opponentDeck)}</strong>
-                <span>${escapeHtml(session?.name || "")}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
+                <span>${selectedPlayerRecordType === "all" ? `<i class="player-record-type-chip">${escapeHtml(recordTypeLabel(match.recordType))}</i>` : ""}${escapeHtml(session?.name || (selectedPlayerRecordType === "all" ? "" : recordTypeLabel(match.recordType)))}・${firstLabels[match.firstPlayer]}・相手${rpsLabels[match.opponentRps]}</span>
               </span>
               <span class="result-pill ${match.result}">${resultLabels[match.result]}</span>
             </${adminPreview ? "article" : "button"}>
@@ -1430,12 +1471,13 @@ function renderPlayers() {
       <select data-player-sort aria-label="並び順">${optionTags([["latest", "最終対戦日"], ["matches", "対戦数"], ["winRate", "勝率"], ["name", "名前"]], sortKey)}</select>
       <button type="button" data-player-direction aria-label="${direction === "desc" ? "降順" : "昇順"}">${direction === "desc" ? "↓" : "↑"}</button>
     </div>
-    <div class="player-context-filters">
+    <div class="player-context-filters three">
       <label><span>期間</span><select data-player-month aria-label="期間"><option value="">全期間</option>${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}</select></label>
       <label><span>環境</span><select data-player-environment aria-label="環境"><option value="">全環境</option>${environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === selectedEnvironment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
+      <label><span>種別</span><select data-player-record-type aria-label="記録種別">${optionTags([["challenge", "チャレンジ"], ["free", "フリー"], ["tuning", "調整"], ["all", "すべて"]], selectedPlayerRecordType)}</select></label>
     </div>
     <div class="list-stack player-list" data-player-results>
-      ${playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment))}
+      ${playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment || selectedPlayerRecordType !== "challenge"))}
     </div>
   `;
 }
@@ -1494,7 +1536,7 @@ function playerRpsMarkup(rps, compact = false) {
 function renderSessions() {
   title.textContent = "大会";
   const selectedView = route.view === "stores" ? "stores" : "sessions";
-  const sessions = sortSessionsNewestFirst(state.sessions);
+  const sessions = sortSessionsNewestFirst(filterSessionsByRecordType(state.sessions, "challenge"));
   view.innerHTML = `
     <div class="view-switch" aria-label="大会表示">
       <button class="${selectedView === "sessions" ? "active" : ""}" type="button" data-tournament-view="sessions">セッション</button>
@@ -1518,7 +1560,7 @@ function renderSessions() {
 }
 
 function renderStoreList() {
-  const stores = uniqueValues(state.sessions.map((session) => session.name)).map((name) => {
+  const stores = uniqueValues(filterSessionsByRecordType(state.sessions, "challenge").map((session) => session.name)).map((name) => {
     const sessions = sessionsForStore(name);
     const latest = sessions[0];
     return { name, sessions, latest };
@@ -1581,6 +1623,9 @@ function renderAdmin() {
   const dashboard = buildAdminDashboard(adminState.raw, {
     month: selectedTab === "users" ? "" : route.adminMonth || "",
     environment: selectedTab === "users" ? "" : route.adminEnvironment || "",
+    recordType: selectedTab === "users"
+      ? "all"
+      : normalizeRecordType(route.adminRecordType, { allowAll: true }),
     excludePasses: selectedTab === "users" ? false : Boolean(route.adminExcludePasses),
     consentedOnly: selectedTab === "users" ? false : Boolean(route.adminConsentedOnly)
   });
@@ -1590,9 +1635,10 @@ function renderAdmin() {
       ? "選択条件を全記録に適用"
       : "勝率は完了試合のみ";
   view.innerHTML = `
-    ${selectedTab === "users" ? "" : `<section class="admin-filter-bar" aria-label="管理者集計フィルター">
+    ${selectedTab === "users" ? "" : `<section class="admin-filter-bar with-record-type" aria-label="管理者集計フィルター">
       <label><span>期間</span><select data-admin-month><option value="">全期間</option>${dashboard.filterOptions.months.map((month) => `<option value="${month}" ${month === dashboard.filters.month ? "selected" : ""}>${formatMonth(month)}</option>`).join("")}</select></label>
       <label><span>環境</span><select data-admin-environment><option value="">全環境</option>${dashboard.filterOptions.environments.map((environment) => `<option value="${escapeHtml(environment)}" ${environment === dashboard.filters.environment ? "selected" : ""}>${escapeHtml(environment)}</option>`).join("")}</select></label>
+      <label><span>種別</span><select data-admin-record-type>${optionTags([["challenge", "チャレンジ"], ["free", "フリー"], ["tuning", "調整"], ["all", "すべて"]], dashboard.filters.recordType)}</select></label>
       <div class="admin-filter-toggles">
         <label><input type="checkbox" data-admin-exclude-passes ${route.adminExcludePasses ? "checked" : ""}>パスを除く</label>
         <label><input type="checkbox" data-admin-consented-only ${route.adminConsentedOnly ? "checked" : ""}>同意者のみ</label>
@@ -1840,6 +1886,7 @@ function updateAdminUserSearchResults(search) {
   const dashboard = buildAdminDashboard(adminState.raw || {}, {
     month: "",
     environment: "",
+    recordType: "all",
     excludePasses: false,
     consentedOnly: false
   });
@@ -1987,6 +2034,7 @@ function analysisRoute(overrides = {}) {
     environment: route.environment || "",
     store: route.store || "",
     month: route.month || "",
+    recordType: normalizeRecordType(route.recordType, { allowAll: true }),
     pivot: route.pivot || "opponentDeck",
     sort: route.sort || "total",
     excludePasses: Boolean(route.excludePasses),
@@ -2088,7 +2136,18 @@ function openDialog(mode, targetId = null) {
     const sessionVersions = sessionVersionOptions(state, selectedSessionDeckId, selectedSessionVersion);
     const selectedSessionPartnerColor = editingSession?.partnerColor || selectedSessionDeck?.partnerColor || "";
     const selectedSessionCaseCardId = editingSession?.caseCardId || selectedSessionDeck?.caseCardId || "";
+    const selectedSessionRecordType = normalizeRecordType(editingSession?.recordType || route.recordType);
     dialogFields.innerHTML = `
+      <fieldset class="session-record-type-field">
+        <legend>記録種別</legend>
+        <div class="session-record-type-options">
+          ${[
+            ["challenge", "チャレンジ"],
+            ["free", "フリー"],
+            ["tuning", "調整"]
+          ].map(([value, label]) => `<label><input type="radio" name="recordType" value="${value}" data-session-record-type ${value === selectedSessionRecordType ? "checked" : ""}><span>${label}</span></label>`).join("")}
+        </div>
+      </fieldset>
       ${fixedDeck ? `
         <div class="locked-field">
           <span>使用デッキ</span>
@@ -2100,7 +2159,7 @@ function openDialog(mode, targetId = null) {
         <label>使用デッキ<select name="deckId" data-session-deck-select required>${editableDecks.map((deck) => `<option value="${deck.id}" ${deck.id === selectedSessionDeckId ? "selected" : ""}>${escapeHtml(deck.name)}</option>`).join("")}</select></label>
       `}
       ${editingSession ? `<label>使用時のバージョン<select name="deckVersion" data-session-version-select required>${optionTags(sessionVersions.map((version) => [version, version]), selectedSessionVersion)}</select></label>` : ""}
-      <label>大会名/店舗名<input name="name" list="sessionNameSuggestions" required placeholder="例: 秋葉原チェルモ" value="${escapeHtml(editingSession?.name || "")}"></label>
+      <label data-session-name-field><span data-session-name-label>大会名/店舗名</span><input name="name" list="sessionNameSuggestions" required placeholder="例: 秋葉原チェルモ" value="${escapeHtml(editingSession?.name || "")}"></label>
       ${sessionEnvironmentField(editingSession)}
       <div class="inline-fields">
         <label>日付<input type="date" name="date" required value="${editingSession?.date || new Date().toISOString().slice(0, 10)}"></label>
@@ -2118,7 +2177,7 @@ function openDialog(mode, targetId = null) {
           })}
         </details>
       ` : ""}
-      <details class="session-result-fields" ${editingSession?.placement || editingSession?.randomPrizeMethod ? "open" : ""}>
+      <details class="session-result-fields" data-challenge-session-field ${editingSession?.placement || editingSession?.randomPrizeMethod ? "open" : ""}>
         <summary>大会結果・ランダム賞</summary>
         <label>大会結果<select name="placement" data-placement-select>${optionTags([["", "未記録"], ["champion", "優勝"], ["second", "2位"], ["top4", "ベスト4"], ["other", "その他"]], editingSession?.placement || "")}</select></label>
         <label>その他の結果<input name="placementNote" placeholder="例: ベスト8" value="${escapeHtml(editingSession?.placementNote || "")}"></label>
@@ -2174,8 +2233,25 @@ function openDialog(mode, targetId = null) {
 
   dialog.scrollTop = 0;
   entryForm.scrollTop = 0;
+  if (dialogMode === "session") syncSessionRecordTypeFields();
   if (dialogMode === "match") syncRoundFormFields();
   if (!dialog.open) dialog.showModal();
+}
+
+function syncSessionRecordTypeFields() {
+  const selected = dialogFields.querySelector("[data-session-record-type]:checked");
+  if (!selected) return;
+  const recordType = normalizeRecordType(selected.value);
+  dialogFields.querySelectorAll("[data-challenge-session-field]").forEach((field) => {
+    field.hidden = recordType !== "challenge";
+  });
+  const nameInput = entryForm.elements.name;
+  const nameLabel = dialogFields.querySelector("[data-session-name-label]");
+  if (nameInput) {
+    nameInput.required = recordType === "challenge";
+    nameInput.placeholder = recordType === "challenge" ? "例: 秋葉原チェルモ" : "店舗名・対戦会名（任意）";
+  }
+  if (nameLabel) nameLabel.textContent = recordType === "challenge" ? "大会名/店舗名" : "場所・セッション名（任意）";
 }
 
 function syncRoundFormFields() {
@@ -2257,10 +2333,11 @@ entryForm.addEventListener("submit", (event) => {
       : selectedDeck?.caseCardId || "";
     if (sessionCaseCardId === null) return;
     const randomPrizeMethod = data.get("randomPrizeMethod") || "";
-    const session = {
+    const session = sanitizeSessionForRecordType({
       id: editingSessionId || crypto.randomUUID(),
       createdAt: resolveSessionCreatedAt(currentSession, new Date().toISOString()),
       deckId: data.get("deckId"),
+      recordType: normalizeRecordType(data.get("recordType")),
       deckVersion: data.get("deckVersion")?.trim() || selectedDeck?.version || "v1",
       partnerColor: currentSession
         ? sessionPartnerColor
@@ -2273,12 +2350,12 @@ entryForm.addEventListener("submit", (event) => {
       format: data.get("format"),
       environment: data.get("environment"),
       placement: data.get("placement") || "",
-      placementNote: data.get("placementNote").trim(),
+      placementNote: data.get("placementNote")?.trim() || "",
       randomPrizeWon: canWinRandomPrize(data.get("placement")) && data.get("randomPrizeWon") === "on",
       randomPrizeMethod,
-      randomPrizeMethodNote: data.get("randomPrizeMethodNote").trim(),
+      randomPrizeMethodNote: data.get("randomPrizeMethodNote")?.trim() || "",
       staffRpsHands: randomPrizeMethod === "rps" ? [data.get("staffRps1"), data.get("staffRps2"), data.get("staffRps3")] : ["", "", ""]
-    };
+    });
     if (editingSessionId) {
       state = updateSessionDeck(state, {
         sessionId: editingSessionId,
@@ -2290,7 +2367,11 @@ entryForm.addEventListener("submit", (event) => {
       state.sessions.push(session);
     }
     state.decks = state.decks.map((deck) => deck.id === session.deckId ? { ...deck, lastUsedAt: session.date } : deck);
-    route = { name: "session", sessionId: session.id };
+    route = {
+      name: "session",
+      sessionId: session.id,
+      returnDeckRecordType: normalizeRecordType(route.recordType || session.recordType)
+    };
   }
 
   if (dialogMode === "match") {
@@ -2451,11 +2532,19 @@ view.addEventListener("click", (event) => {
   const analysisColorMatchupButton = event.target.closest("[data-analysis-color-matchup]");
   const renamePlayerButton = event.target.closest("[data-rename-player]");
   const playerDirectionButton = event.target.closest("[data-player-direction]");
+  const playerRecordTypeTab = event.target.closest("[data-player-record-type-tab]");
   const deckViewButton = event.target.closest("[data-deck-view]");
+  const deckRecordTypeButton = event.target.closest("[data-deck-record-type]");
   const tournamentViewButton = event.target.closest("[data-tournament-view]");
   const storeButton = event.target.closest("[data-open-store]");
-  if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck, returnDeckView: route.deckView || "active" });
-  if (sessionButton) setRoute({ name: "session", sessionId: sessionButton.dataset.openSession, returnStore: route.name === "storeDetail" ? route.storeName : "", returnAfterStore: route.name === "storeDetail" ? route.returnRoute : null });
+  if (deckButton) setRoute({ name: "deckDetail", deckId: deckButton.dataset.openDeck, recordType: "challenge", returnDeckView: route.deckView || "active" });
+  if (sessionButton) setRoute({
+    name: "session",
+    sessionId: sessionButton.dataset.openSession,
+    returnDeckRecordType: route.name === "deckDetail" ? normalizeRecordType(route.recordType) : "",
+    returnStore: route.name === "storeDetail" ? route.storeName : "",
+    returnAfterStore: route.name === "storeDetail" ? route.returnRoute : null
+  });
   if (playerButton) setRoute({ ...route, name: "playerDetail", playerName: playerButton.dataset.openPlayer });
   if (editButton && !adminPreview) openDialog("match", editButton.dataset.editMatch);
   if (editSessionButton && !adminPreview) openDialog("session", editSessionButton.dataset.editSession);
@@ -2463,7 +2552,13 @@ view.addEventListener("click", (event) => {
   if (analysisColorMatchupButton) setRoute(analysisRoute({ pivot: "colorMatrix", colorMatchup: analysisColorMatchupButton.dataset.analysisColorMatchup }));
   if (renamePlayerButton && !adminPreview) openDialog("playerRename", renamePlayerButton.dataset.renamePlayer);
   if (playerDirectionButton) setRoute({ ...route, name: "players", playerName: "", playerDirection: route.playerDirection === "asc" ? "desc" : "asc" });
+  if (playerRecordTypeTab) setRoute({
+    ...route,
+    name: "playerDetail",
+    playerRecordType: normalizeRecordType(playerRecordTypeTab.dataset.playerRecordTypeTab, { allowAll: true })
+  });
   if (deckViewButton) setRoute({ name: "decks", deckView: deckViewButton.dataset.deckView === "archived" ? "archived" : "active" });
+  if (deckRecordTypeButton) setRoute({ ...route, name: "deckDetail", recordType: normalizeRecordType(deckRecordTypeButton.dataset.deckRecordType) });
   if (tournamentViewButton) setRoute({ name: "sessions", view: tournamentViewButton.dataset.tournamentView });
   if (storeButton) setRoute({ name: "storeDetail", storeName: storeButton.dataset.openStore, returnRoute: route.name === "summary" ? { ...route } : null });
 });
@@ -2473,6 +2568,15 @@ view.addEventListener("change", (event) => {
   if (adminMonth) setRoute({ ...route, name: "admin", adminMonth: adminMonth.value, adminMatchup: "" });
   const adminEnvironment = event.target.closest("[data-admin-environment]");
   if (adminEnvironment) setRoute({ ...route, name: "admin", adminEnvironment: adminEnvironment.value, adminMatchup: "" });
+  const adminRecordType = event.target.closest("[data-admin-record-type]");
+  if (adminRecordType) setRoute({
+    ...route,
+    name: "admin",
+    adminRecordType: normalizeRecordType(adminRecordType.value, { allowAll: true }),
+    adminMonth: "",
+    adminEnvironment: "",
+    adminMatchup: ""
+  });
   const adminExcludePasses = event.target.closest("[data-admin-exclude-passes]");
   if (adminExcludePasses) setRoute({ ...route, name: "admin", adminExcludePasses: adminExcludePasses.checked, adminMatchup: "" });
   const adminConsentedOnly = event.target.closest("[data-admin-consented-only]");
@@ -2503,12 +2607,29 @@ view.addEventListener("change", (event) => {
   if (environmentSelect) setRoute(analysisRoute({ environment: environmentSelect.value, store: "" }));
   const storeSelect = event.target.closest("[data-analysis-store-select]");
   if (storeSelect) setRoute(analysisRoute({ store: storeSelect.value }));
+  const analysisRecordType = event.target.closest("[data-analysis-record-type]");
+  if (analysisRecordType) setRoute(analysisRoute({
+    recordType: normalizeRecordType(analysisRecordType.value, { allowAll: true }),
+    version: "",
+    environment: "",
+    store: "",
+    colorMatchup: ""
+  }));
   const playerSort = event.target.closest("[data-player-sort]");
   if (playerSort) setRoute({ ...route, name: "players", playerName: "", playerSort: playerSort.value });
   const playerMonth = event.target.closest("[data-player-month]");
   if (playerMonth) setRoute({ ...route, name: "players", playerName: "", playerMonth: playerMonth.value });
   const playerEnvironment = event.target.closest("[data-player-environment]");
   if (playerEnvironment) setRoute({ ...route, name: "players", playerName: "", playerEnvironment: playerEnvironment.value });
+  const playerRecordType = event.target.closest("[data-player-record-type]");
+  if (playerRecordType) setRoute({
+    ...route,
+    name: "players",
+    playerName: "",
+    playerRecordType: normalizeRecordType(playerRecordType.value, { allowAll: true }),
+    playerMonth: "",
+    playerEnvironment: ""
+  });
   const excludePasses = event.target.closest("[data-analysis-exclude-passes]");
   if (excludePasses) setRoute(analysisRoute({ excludePasses: excludePasses.checked }));
   const minimumColorSamples = event.target.closest("[data-analysis-minimum-color-samples]");
@@ -2517,10 +2638,12 @@ view.addEventListener("change", (event) => {
 
 function updatePlayerSearchResults(search) {
   route = { ...route, name: "players", playerName: "", playerQuery: search.value };
-  const selectedMonth = analysisMonths().includes(route.playerMonth) ? route.playerMonth : "";
-  const environments = environmentOptions();
+  const selectedPlayerRecordType = normalizeRecordType(route.playerRecordType, { allowAll: true });
+  const recordTypeMatches = filterMatchesByRecordType(enrichMatches(state.matches), selectedPlayerRecordType);
+  const selectedMonth = analysisMonths(selectedPlayerRecordType).includes(route.playerMonth) ? route.playerMonth : "";
+  const environments = uniqueValues(recordTypeMatches.map((match) => match.environment));
   const selectedEnvironment = environments.includes(route.playerEnvironment) ? route.playerEnvironment : "";
-  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(enrichMatches(state.matches), selectedMonth), selectedEnvironment);
+  const periodMatches = filterMatchesByEnvironment(filterMatchesByMonth(recordTypeMatches, selectedMonth), selectedEnvironment);
   const query = String(search.value || "").trim().toLocaleLowerCase("ja");
   const sortKey = ["latest", "matches", "winRate", "name"].includes(route.playerSort) ? route.playerSort : "latest";
   const direction = route.playerDirection === "asc" ? "asc" : "desc";
@@ -2530,7 +2653,7 @@ function updatePlayerSearchResults(search) {
     direction
   );
   const results = view.querySelector("[data-player-results]");
-  if (results) results.innerHTML = playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment));
+  if (results) results.innerHTML = playerRowsMarkup(rows, query, Boolean(selectedMonth || selectedEnvironment || selectedPlayerRecordType !== "challenge"));
 }
 
 view.addEventListener("input", (event) => {
@@ -2552,6 +2675,8 @@ dialogFields.addEventListener("change", (event) => {
   if (playerInput) updatePlayerNameSuggestions(playerInput);
   const sessionDeckSelect = event.target.closest("[data-session-deck-select]");
   if (sessionDeckSelect) updateSessionVersionPicker(sessionDeckSelect.value);
+  const sessionRecordType = event.target.closest("[data-session-record-type]");
+  if (sessionRecordType) syncSessionRecordTypeFields();
   const partnerColorInput = event.target.closest("[data-partner-color-input]");
   if (partnerColorInput) {
     updateCaseCardPicker(partnerColorInput.dataset.partnerColorInput, partnerColorInput.value);
@@ -3131,9 +3256,13 @@ backButton.addEventListener("click", () => {
   if (route.name === "session") {
     const session = getSession(route.sessionId);
     if (route.returnStore) setRoute({ name: "storeDetail", storeName: route.returnStore, returnRoute: route.returnAfterStore });
-    else setRoute(session ? { name: "deckDetail", deckId: session.deckId } : { name: "sessions" });
+    else setRoute(session ? {
+      name: "deckDetail",
+      deckId: session.deckId,
+      recordType: normalizeRecordType(route.returnDeckRecordType || session.recordType)
+    } : { name: "sessions" });
   }
-  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "" });
+  if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "", playerRecordType: normalizeRecordType(route.playerRecordType, { allowAll: true }) });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
   if (route.name === "repair") setRoute({ name: "summary" });
   if (route.name === "recovery") setRoute({ name: "decks" });
