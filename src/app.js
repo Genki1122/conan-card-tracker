@@ -115,6 +115,11 @@ import {
   passBadgeItems
 } from "./matchup-detail.js";
 import {
+  latestRelease,
+  normalizeReleaseManifest,
+  releaseForVersion
+} from "./release-notes.js";
+import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
   deleteEnvironmentCatalogItem,
@@ -159,6 +164,9 @@ const syncStatusLabel = document.querySelector("#syncStatus");
 const backButton = document.querySelector("#backButton");
 const fabButton = document.querySelector("#fabButton");
 const updateBanner = document.querySelector("#updateBanner");
+const updateBannerTitle = document.querySelector("#updateBannerTitle");
+const updateBannerSummary = document.querySelector("#updateBannerSummary");
+const showUpdateDetailsButton = document.querySelector("#showUpdateDetailsButton");
 const applyUpdateButton = document.querySelector("#applyUpdateButton");
 const dialog = document.querySelector("#entryDialog");
 const entryForm = document.querySelector("#entryForm");
@@ -208,6 +216,9 @@ let dataSettingsMessage = "";
 let accountRecovery = { anonymous: null, preview: null, message: "", saving: false };
 let activeCaseCardScope = "";
 let caseCardReturnFocus = null;
+let releaseManifest = normalizeReleaseManifest();
+let releaseLoadPromise = null;
+let availableRelease = null;
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -2253,6 +2264,14 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>${dataSettingsMarkup()}`;
   }
 
+  if (mode === "releaseNotes") {
+    const release = releaseForVersion(releaseManifest, targetId) || availableRelease || latestRelease(releaseManifest);
+    dialogKicker.textContent = "Update";
+    dialogTitle.textContent = release?.title || "更新内容";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = releaseDetailsMarkup(release);
+  }
+
   if (mode === "playerNameTrimPreview") {
     dialogKicker.textContent = "Data";
     dialogTitle.textContent = "変更内容を確認";
@@ -4042,9 +4061,49 @@ function registerServiceWorker() {
 function showUpdateBanner() {
   if (updateBanner) updateBanner.hidden = false;
   phoneShell?.classList.add("update-available");
+  loadReleaseManifest().then((manifest) => {
+    const release = latestRelease(manifest);
+    availableRelease = release;
+    updateBannerTitle.textContent = release?.title || "新しい更新があります";
+    updateBannerSummary.textContent = release?.summary || "更新内容を確認して反映できます";
+  });
 }
 
+showUpdateDetailsButton?.addEventListener("click", async () => {
+  const manifest = await loadReleaseManifest();
+  availableRelease = latestRelease(manifest);
+  openDialog("releaseNotes", availableRelease?.version || "");
+});
+
 applyUpdateButton?.addEventListener("click", () => window.location.reload());
+
+async function loadReleaseManifest() {
+  if (releaseLoadPromise) return releaseLoadPromise;
+  releaseLoadPromise = fetch("./releases.json", { cache: "no-store" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Release metadata request failed: ${response.status}`);
+      return response.json();
+    })
+    .then((payload) => {
+      releaseManifest = normalizeReleaseManifest(payload);
+      return releaseManifest;
+    })
+    .catch(() => releaseManifest);
+  return releaseLoadPromise;
+}
+
+function releaseDetailsMarkup(release) {
+  if (!release) {
+    return `<div class="release-empty" role="status">更新情報を取得できませんでした。更新はそのまま実行できます。</div>`;
+  }
+  return `
+    <section class="release-details">
+      <div class="release-meta"><span>v${escapeHtml(release.version)}</span><time datetime="${escapeHtml(release.releasedAt)}">${escapeHtml(release.releasedAt)}</time></div>
+      ${release.summary ? `<p>${escapeHtml(release.summary)}</p>` : ""}
+      <ul>${release.items.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
 
 function cloudMenuMarkup() {
   const config = getCloudConfig();

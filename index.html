@@ -30,8 +30,14 @@
       <button id="fabButton" class="fab" type="button" aria-label="追加">＋</button>
 
       <aside id="updateBanner" class="update-banner" aria-live="polite" hidden>
-        <span>新しいバージョンがあります</span>
-        <button id="applyUpdateButton" type="button">更新</button>
+        <span class="update-banner-copy">
+          <strong id="updateBannerTitle">新しい更新があります</strong>
+          <small id="updateBannerSummary" class="update-banner-summary">更新内容を確認して反映できます</small>
+        </span>
+        <span class="update-banner-actions">
+          <button id="showUpdateDetailsButton" class="update-banner-detail" type="button">内容</button>
+          <button id="applyUpdateButton" type="button">更新</button>
+        </span>
       </aside>
 
       <nav class="bottom-nav" aria-label="メイン">

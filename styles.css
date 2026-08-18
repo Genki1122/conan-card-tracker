@@ -1235,10 +1235,10 @@ article.match-history-card {
   left: 50%;
   bottom: 84px;
   z-index: 8;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   width: min(calc(100% - 24px), 456px);
   min-height: 50px;
   transform: translateX(-50%);
@@ -1251,6 +1251,38 @@ article.match-history-card {
   font-weight: 900;
 }
 
+.update-banner-copy {
+  min-width: 0;
+}
+
+.update-banner-copy strong,
+.update-banner-copy small {
+  display: block;
+}
+
+.update-banner-copy strong {
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-banner-summary {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-banner-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
 .update-banner[hidden] {
   display: none;
 }
@@ -1260,7 +1292,7 @@ article.match-history-card {
 }
 
 .update-banner button {
-  min-width: 58px;
+  min-width: 48px;
   min-height: 34px;
   border: 0;
   border-radius: 9px;
@@ -1268,6 +1300,12 @@ article.match-history-card {
   color: #fff;
   font-size: 0.76rem;
   font-weight: 900;
+}
+
+.update-banner button.update-banner-detail {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
 }
 
 .bottom-nav {
@@ -1528,6 +1566,62 @@ label {
   color: var(--purple);
   font-size: 0.8rem;
   font-weight: 900;
+}
+
+.release-details {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #17141d;
+}
+
+.release-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.release-meta span {
+  color: var(--purple);
+}
+
+.release-details p {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.release-details ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding-left: 1.3em;
+}
+
+.release-details li {
+  padding-left: 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.release-empty {
+  padding: 20px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #17141d;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.6;
 }
 
 .menu-note span {
