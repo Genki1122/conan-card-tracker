@@ -2,6 +2,7 @@ import {
   getCaseCard,
   partnerColorLabel
 } from "./card-catalog.js";
+import { passBadgeItems } from "./matchup-detail.js";
 import { normalizeRecordType } from "./record-types.js";
 
 const placementLabels = {
@@ -47,11 +48,17 @@ export function buildSessionShareText({ session = {}, deck = {}, matches = [] } 
     completedMatches.forEach((match) => {
       const turn = turnLabels[match.firstPlayer] || "－";
       const result = resultLabels[match.result] || "－";
-      lines.push(`${turn} ${result}｜${opponentDeckLabel(match)}`);
+      lines.push(`${turn} ${result}｜${opponentDeckLabel(match)}${passSuffix(match)}`);
     });
   }
 
   return lines.join("\n");
+}
+
+function passSuffix(match) {
+  if (match.roundType === "bye") return "";
+  const labels = passBadgeItems(match).map(({ label }) => label);
+  return labels.length ? `｜${labels.join("・")}` : "";
 }
 
 export function buildXShareUrl(text) {

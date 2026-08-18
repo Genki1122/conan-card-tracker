@@ -81,19 +81,39 @@ test("does not include pending matches in the record or round list", () => {
   assert.equal(text.includes("FBI"), false);
 });
 
+test("adds recorded passes as a compact suffix without changing no-pass rows", () => {
+  const text = buildSessionShareText({
+    session: { name: "ショップ大会" },
+    deck: { name: "鬼丸剣道" },
+    matches: [
+      { opponentDeck: "白単", firstPlayer: "second", result: "win", myPassed: "none", opponentPassed: "none" },
+      { opponentDeck: "疾風", firstPlayer: "first", result: "loss", myPassed: "pass1", opponentPassed: "none" },
+      { opponentDeck: "高佐", firstPlayer: "second", result: "win", myPassed: "none", opponentPassed: "pass1" },
+      { opponentDeck: "FBI", firstPlayer: "first", result: "draw", myPassed: "pass12", opponentPassed: "pass2" }
+    ]
+  });
+
+  assert.equal(text.includes("後 ○｜白単\n"), true);
+  assert.equal(text.includes("先 × ｜疾風｜1パス"), true);
+  assert.equal(text.includes("後 ○｜高佐｜被1パス"), true);
+  assert.equal(text.includes("先 △｜FBI｜1&2パス・被2パス"), true);
+  assert.equal(text.includes("パス無"), false);
+});
+
 test("counts a bye in the official record and labels its round explicitly", () => {
   const text = buildSessionShareText({
     session: { name: "ショップ大会" },
     deck: { name: "鬼丸剣道" },
     matches: [
       { opponentDeck: "高佐", firstPlayer: "second", result: "loss", roundType: "played" },
-      { opponentDeck: "", firstPlayer: "", result: "win", roundType: "bye" }
+      { opponentDeck: "", firstPlayer: "", result: "win", roundType: "bye", myPassed: "pass1", opponentPassed: "pass2" }
     ]
   });
 
   assert.equal(text.includes("結果　1-1"), true);
   assert.equal(text.includes("－ ○｜不戦勝"), true);
   assert.equal(text.includes("｜不明"), false);
+  assert.equal(text.includes("不戦勝｜"), false);
 });
 
 test("creates an editable X compose URL with the generated text", () => {
