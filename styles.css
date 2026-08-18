@@ -1624,6 +1624,50 @@ label {
   line-height: 1.6;
 }
 
+.release-history {
+  display: grid;
+}
+
+.release-history article {
+  display: grid;
+  gap: 7px;
+  padding: 14px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.release-history article:first-child {
+  padding-top: 2px;
+}
+
+.release-history article:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.release-history h3,
+.release-history p,
+.release-history ul {
+  margin: 0;
+}
+
+.release-history h3 {
+  font-size: 0.96rem;
+}
+
+.release-history p,
+.release-history li {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.release-history ul {
+  display: grid;
+  gap: 5px;
+  padding-left: 1.3em;
+}
+
 .menu-note span {
   color: var(--muted);
   font-size: 0.86rem;

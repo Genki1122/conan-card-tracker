@@ -36,3 +36,26 @@ test("the shared sheet renders concise release details", async () => {
   assert.match(appSource, /release\.items\.slice\(0, 4\)/);
   assert.match(appSource, /更新情報を取得できませんでした/);
 });
+
+test("the running release is shown automatically only when it is unseen", async () => {
+  const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
+
+  assert.match(appSource, /const appVersion = "54"/);
+  assert.match(appSource, /async function initializeReleaseNotes/);
+  assert.match(appSource, /unseenRelease\(manifest, readSeenReleaseVersion\(localStorage\), appVersion\)/);
+  assert.match(appSource, /if \(!release \|\| dialog\.open \|\| accountOnboardingActive\) return/);
+  assert.match(appSource, /openDialog\("releaseNotes", release\.version\);\s*markReleaseSeen\(localStorage, release\.version\);/);
+});
+
+test("the three-dot menu keeps a route to release history", async () => {
+  const [appSource, styles] = await Promise.all([
+    readFile(new URL("src/app.js", rootUrl), "utf8"),
+    readFile(new URL("styles.css", rootUrl), "utf8")
+  ]);
+
+  assert.match(appSource, /data-open-menu-panel="releaseHistory"/);
+  assert.match(appSource, /mode === "releaseHistory"/);
+  assert.match(appSource, /function releaseHistoryMarkup/);
+  assert.match(appSource, /更新履歴/);
+  assert.match(styles, /\.release-history/);
+});

@@ -116,8 +116,11 @@ import {
 } from "./matchup-detail.js";
 import {
   latestRelease,
+  markReleaseSeen,
   normalizeReleaseManifest,
-  releaseForVersion
+  readSeenReleaseVersion,
+  releaseForVersion,
+  unseenRelease
 } from "./release-notes.js";
 import {
   addEnvironmentCatalogItem,
@@ -147,6 +150,7 @@ const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
+const appVersion = "54";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -2272,6 +2276,16 @@ function openDialog(mode, targetId = null) {
     dialogFields.innerHTML = releaseDetailsMarkup(release);
   }
 
+  if (mode === "releaseHistory") {
+    dialogKicker.textContent = "Update";
+    dialogTitle.textContent = "更新履歴";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `
+      <button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>
+      ${releaseHistoryMarkup(releaseManifest)}
+    `;
+  }
+
   if (mode === "playerNameTrimPreview") {
     dialogKicker.textContent = "Data";
     dialogTitle.textContent = "変更内容を確認";
@@ -2945,6 +2959,14 @@ dialogFields.addEventListener("click", (event) => {
   if (menuPanelButton) {
     const panel = menuPanelButton.dataset.openMenuPanel;
     if (panel === "dataSettings") dataSettingsMessage = "";
+    if (panel === "releaseHistory") {
+      loadReleaseManifest().then(() => {
+        openDialog("releaseHistory");
+        const currentRelease = releaseForVersion(releaseManifest, appVersion);
+        if (currentRelease) markReleaseSeen(localStorage, currentRelease.version);
+      });
+      return;
+    }
     openDialog(panel);
     return;
   }
@@ -3496,6 +3518,7 @@ if (accountOnboardingActive) {
   history.replaceState(null, "", clearAccountOnboardingUrl(window.location.href));
 }
 refreshCloudSession();
+initializeReleaseNotes();
 
 dialog.addEventListener("close", () => {
   closeCaseCardDialog();
@@ -4092,6 +4115,14 @@ async function loadReleaseManifest() {
   return releaseLoadPromise;
 }
 
+async function initializeReleaseNotes() {
+  const manifest = await loadReleaseManifest();
+  const release = unseenRelease(manifest, readSeenReleaseVersion(localStorage), appVersion);
+  if (!release || dialog.open || accountOnboardingActive) return;
+  openDialog("releaseNotes", release.version);
+  markReleaseSeen(localStorage, release.version);
+}
+
 function releaseDetailsMarkup(release) {
   if (!release) {
     return `<div class="release-empty" role="status">更新情報を取得できませんでした。更新はそのまま実行できます。</div>`;
@@ -4102,6 +4133,24 @@ function releaseDetailsMarkup(release) {
       ${release.summary ? `<p>${escapeHtml(release.summary)}</p>` : ""}
       <ul>${release.items.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
     </section>
+  `;
+}
+
+function releaseHistoryMarkup(manifest) {
+  if (!manifest.releases.length) {
+    return `<div class="release-empty" role="status">更新情報を取得できませんでした。</div>`;
+  }
+  return `
+    <div class="release-history">
+      ${manifest.releases.map((release) => `
+        <article>
+          <div class="release-meta"><span>v${escapeHtml(release.version)}</span><time datetime="${escapeHtml(release.releasedAt)}">${escapeHtml(release.releasedAt)}</time></div>
+          <h3>${escapeHtml(release.title)}</h3>
+          ${release.summary ? `<p>${escapeHtml(release.summary)}</p>` : ""}
+          <ul>${release.items.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -4258,6 +4307,7 @@ function menuRowsMarkup() {
     ${pageRow}
     ${adminRow}
     <button type="button" data-open-guide><span>使い方</span><small>初回設定・大会中の記録・データ保護</small><b>›</b></button>
+    <button type="button" data-open-menu-panel="releaseHistory"><span>更新履歴</span><small>機能追加・改善内容を確認</small><b>›</b></button>
     <button type="button" data-open-menu-panel="cloudSettings"><span>クラウド同期</span><small>${escapeHtml(cloudText)}</small><b>›</b></button>
     <button type="button" data-open-menu-panel="dataSettings"><span>環境・データ管理</span><small>環境、名称、バックアップ</small><b>›</b></button>
   `;
