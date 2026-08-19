@@ -40,7 +40,7 @@ test("the shared sheet renders concise release details", async () => {
 test("the running release is shown automatically only when it is unseen", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /const appVersion = "54"/);
+  assert.match(appSource, /const appVersion = "55"/);
   assert.match(appSource, /async function initializeReleaseNotes/);
   assert.match(appSource, /unseenRelease\(manifest, readSeenReleaseVersion\(localStorage\), appVersion\)/);
   assert.match(appSource, /if \(!release \|\| dialog\.open \|\| accountOnboardingActive\) return/);

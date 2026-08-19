@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=54";
+} from "./auth-challenge.js?v=55";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -50,7 +50,7 @@ import {
   filterAdminUsers
 } from "./admin-analytics.js";
 import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=54";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=55";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -92,6 +92,10 @@ import {
   buildXShareUrl,
   isSessionShareAvailable
 } from "./session-share.js";
+import {
+  normalizeSessionRelatedUrl,
+  sessionRelatedUrlValidationMessage
+} from "./session-links.js";
 import {
   matchResultSelection,
   normalizeRoundRecord,
@@ -144,13 +148,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=54";
+} from "./cloud.js?v=55";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "54";
+const appVersion = "55";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -570,6 +574,7 @@ function normalizeState(rawState) {
       ...session,
       recordType: normalizeRecordType(session.recordType),
       environment: normalizeEnvironmentName(session.environment),
+      relatedUrl: normalizeSessionRelatedUrl(session.relatedUrl),
       deckVersion: session.deckVersion || deckVersions.get(session.deckId) || "v1",
       partnerColor: normalizePartnerColor(session.partnerColor),
       caseCardId: String(session.caseCardId || ""),
@@ -1137,6 +1142,7 @@ function renderSession(sessionId) {
   const pendingRounds = pendingMatchesForSession(sessionId);
   const deck = getDeck(session.deckId);
   const shareUrl = buildXShareUrl(buildSessionShareText({ session, deck, matches: rounds }));
+  const relatedUrl = normalizeSessionRelatedUrl(session.relatedUrl);
 
   title.textContent = session.name || recordTypeLabel(session.recordType);
   view.innerHTML = `
@@ -1148,7 +1154,7 @@ function renderSession(sessionId) {
           ${isSessionShareAvailable(session) ? `<a class="session-share-button" href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" data-session-share data-pending-count="${pendingRounds.length}" aria-label="Xに結果を投稿" title="Xに結果を投稿">X</a>` : ""}
         </div>
       `}
-      <p>${normalizeRecordType(session.recordType) === "challenge" || !session.name ? "" : `<span class="session-type-chip">${escapeHtml(recordTypeLabel(session.recordType))}</span>`}<span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span></p>
+      <p>${normalizeRecordType(session.recordType) === "challenge" || !session.name ? "" : `<span class="session-type-chip">${escapeHtml(recordTypeLabel(session.recordType))}</span>`}<span>${formatDate(session.date)}</span><span>${escapeHtml(session.deckVersion || "v1")}</span><span>${escapeHtml(session.environment || "未設定")}</span><span>${escapeHtml(session.format || "BO1")}</span>${relatedUrl ? `<a class="session-related-link" href="${escapeHtml(relatedUrl)}" target="_blank" rel="noopener noreferrer" aria-label="関連URLを新しいタブで開く">関連リンク ↗</a>` : ""}</p>
       ${isSessionShareAvailable(session) && (session.placement || session.randomPrizeMethod || session.randomPrizeWon) ? `<div class="session-compact-outcome"><span class="result-chip-row">${sessionResultChips(session)}</span><span>${escapeHtml(placementLabels[session.placement] || session.placementNote || "")}</span><span>${escapeHtml(prizeMethodLabels[session.randomPrizeMethod] || session.randomPrizeMethodNote || "")}</span></div>` : ""}
     </section>
     <div class="section-title-row"><h2>ラウンド</h2><span>${rounds.length}ラウンド</span></div>
@@ -2343,6 +2349,14 @@ function openDialog(mode, targetId = null) {
         <label>日付<input type="date" name="date" required value="${editingSession?.date || new Date().toISOString().slice(0, 10)}"></label>
         <label>形式<select name="format">${optionTags([["BO1", "BO1"], ["BO3", "BO3"]], editingSession?.format || "BO1")}</select></label>
       </div>
+      <details class="session-related-link-fields" ${editingSession?.relatedUrl ? "open" : ""}>
+        <summary>関連リンク</summary>
+        <label>関連URL（任意）
+          <input type="text" inputmode="url" autocomplete="url" name="relatedUrl" placeholder="https://..." value="${escapeHtml(editingSession?.relatedUrl || "")}" aria-describedby="sessionRelatedUrlError">
+          <span class="field-error" id="sessionRelatedUrlError" data-related-url-error role="alert" hidden></span>
+        </label>
+        <p class="form-note">トナメルや共有対戦表など、あとで開きたいページを1件保存できます。</p>
+      </details>
       ${editingSession ? `
         <details class="match-extra-fields" ${route.name === "repair" ? "open" : ""}>
           <summary>使用時の色・事件カード</summary>
@@ -2447,6 +2461,19 @@ function syncRoundFormFields() {
   if (note) note.hidden = !formState.isBye;
 }
 
+function showSessionRelatedUrlError(message = "") {
+  const input = entryForm.elements.relatedUrl;
+  const error = dialogFields.querySelector("[data-related-url-error]");
+  if (!input || !error) return;
+  input.setAttribute("aria-invalid", message ? "true" : "false");
+  error.textContent = message;
+  error.hidden = !message;
+  if (message) {
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
 function releaseDialogFocus() {
   const focusedElement = document.activeElement;
   if (focusedElement instanceof HTMLElement && dialog.contains(focusedElement)) {
@@ -2500,6 +2527,11 @@ entryForm.addEventListener("submit", (event) => {
   }
 
   if (dialogMode === "session") {
+    const relatedUrlError = sessionRelatedUrlValidationMessage(data.get("relatedUrl"));
+    if (relatedUrlError) {
+      showSessionRelatedUrlError(relatedUrlError);
+      return;
+    }
     const selectedDeck = getDeck(data.get("deckId"));
     const currentSession = editingSessionId ? getSession(editingSessionId) : null;
     const keepsDeckMetadata = currentSession?.deckId === data.get("deckId");
@@ -2527,6 +2559,7 @@ entryForm.addEventListener("submit", (event) => {
       date: data.get("date"),
       format: data.get("format"),
       environment: data.get("environment"),
+      relatedUrl: normalizeSessionRelatedUrl(data.get("relatedUrl")),
       placement: data.get("placement") || "",
       placementNote: data.get("placementNote")?.trim() || "",
       randomPrizeWon: canWinRandomPrize(data.get("placement")) && data.get("randomPrizeWon") === "on",
@@ -2903,6 +2936,7 @@ dialogFields.addEventListener("input", (event) => {
   if (playerInput && !event.isComposing) updatePlayerNameSuggestions(playerInput);
   const otpInput = event.target.closest("[data-auth-otp]");
   if (otpInput) otpInput.value = normalizeOtpCode(otpInput.value);
+  if (event.target.closest("input[name='relatedUrl']")) showSessionRelatedUrlError();
 });
 
 dialogFields.addEventListener("compositionend", (event) => {
