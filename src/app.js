@@ -3991,6 +3991,7 @@ function adminAccountActionError(error) {
   if (message.includes("CANNOT_DELETE_SELF") || message.includes("CANNOT_DELETE_ADMIN")) return "管理者アカウントは削除できません。";
   if (message.includes("DUPLICATE_ACCOUNT_MISMATCH") || message.includes("INVALID_ACCOUNT_SELECTION")) return "残す同名アカウントを確認してください。";
   if (message.includes("USERNAME_CONFIRMATION_MISMATCH")) return "削除対象のユーザー名が一致していません。";
+  if (error?.code === "42P01" || message.includes("account_recovery_status")) return "Supabaseの引き継ぎ管理設定が不足しています。管理者へ連絡してください。";
   if (message.includes("admin_delete_empty_account") || error?.code === "PGRST202") return "Supabaseにアカウント管理用の設定が必要です。";
   return "アカウントを削除できませんでした。通信状況を確認して再度お試しください。";
 }

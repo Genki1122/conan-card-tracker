@@ -25,3 +25,11 @@ test("admin account management separates preview and deletion and keeps impact v
   assert.match(styles, /\.admin-account-counts[^}]*grid-template-columns: repeat\(3, 1fr\)/s);
   assert.match(styles, /\.admin-user-manage/);
 });
+
+test("admin account deletion explains a missing recovery-status setup", async () => {
+  const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
+
+  assert.match(appSource, /error\?\.code === "42P01"/);
+  assert.match(appSource, /message\.includes\("account_recovery_status"\)/);
+  assert.match(appSource, /引き継ぎ管理設定が不足しています/);
+});
