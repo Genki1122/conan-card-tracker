@@ -49,7 +49,12 @@ import {
   filterAdminMatchups,
   filterAdminUsers
 } from "./admin-analytics.js";
-import { beginAdminPreview, endAdminPreview } from "./admin-view.js";
+import {
+  adminAccountDeletionState,
+  beginAdminPreview,
+  duplicateAdminUsers,
+  endAdminPreview
+} from "./admin-view.js";
 import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=55";
 import {
   activateAnonymousStorage,
@@ -129,6 +134,7 @@ import {
 import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
+  deleteAdminEmptyAccount,
   deleteEnvironmentCatalogItem,
   getCloudConfig,
   initializeCloud,
@@ -215,6 +221,8 @@ let pendingRemoteState = null;
 let accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
 let adminState = { loading: false, error: "", data: null, raw: null };
 let adminPreview = null;
+let managedAdminUserId = "";
+let adminAccountMessage = "";
 let registrationFeedback = loadAuthChallenge(localStorage);
 let environmentCatalog = [];
 let environmentCatalogReady = false;
@@ -1841,7 +1849,7 @@ function adminEnvironmentMarkup(dashboard) {
     .reduce((sum, row) => sum + row.total, 0);
   return `
     <section class="admin-metrics" aria-label="環境集計概要">
-      ${adminMetric("利用者", dashboard.summary.users)}
+      ${adminMetric("対象利用者", dashboard.summary.users)}
       ${adminMetric("大会", dashboard.summary.sessions)}
       ${adminMetric("完了試合", dashboard.summary.matches)}
       ${adminMetric("勝率", `${dashboard.summary.winRate}%`)}
@@ -2002,7 +2010,7 @@ function adminUsersMarkup(dashboard) {
   const filters = {
     query: route.adminUserQuery || "",
     status: ["all", "attention", "recovery", "stale", "empty"].includes(route.adminUserStatus) ? route.adminUserStatus : "all",
-    sort: ["attention", "latest", "matches", "sessions", "winRate"].includes(route.adminUserSort) ? route.adminUserSort : "attention",
+    sort: ["attention", "latest", "matches", "sessions", "winRate"].includes(route.adminUserSort) ? route.adminUserSort : "latest",
     direction: route.adminUserDirection === "asc" ? "asc" : "desc"
   };
   const rows = filterAdminUsers(dashboard.userRows, filters);
@@ -2026,7 +2034,8 @@ function adminUsersMarkup(dashboard) {
       <button type="button" data-admin-user-direction aria-label="昇順と降順を切り替え">${filters.direction === "asc" ? "↑" : "↓"}</button>
       <small data-admin-user-count>${rows.length}人</small>
     </section>
-    <div class="admin-heading"><h2>利用者</h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
+    <div class="admin-heading"><h2>登録利用者 <span>${dashboard.userRows.length}人</span></h2><button type="button" data-copy-ai-dataset>匿名AIデータをコピー</button></div>
+    ${adminAccountMessage ? `<p class="admin-action-message" role="status">${escapeHtml(adminAccountMessage)}</p>` : ""}
     ${adminUserRows(rows)}
   `;
 }
@@ -2035,11 +2044,14 @@ function adminUserRows(rows) {
   return `
     <div class="admin-user-list" data-admin-user-results>
       ${rows.map((row) => `
-        <button class="admin-user-row" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
-          <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span>${adminUserStatusChips(row)}</div>
-          <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
-          <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
-        </button>
+        <article class="admin-user-row">
+          <button class="admin-user-main" type="button" data-open-admin-user="${row.userId}" ${adminState.previewLoadingUserId ? "disabled" : ""}>
+            <div><strong>${escapeHtml(row.username)}</strong><span>最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ・${row.sessions}大会</span>${adminUserStatusChips(row)}</div>
+            <div><strong>${row.winRate}%</strong><span>${row.wins}-${row.losses}-${row.draws} / ${row.matches}戦</span></div>
+            <i class="${row.consented ? "accepted" : ""}">${adminState.previewLoadingUserId === row.userId ? "読込中" : row.consented ? "同意済" : "未同意"}</i>
+          </button>
+          <button class="admin-user-manage" type="button" data-manage-admin-user="${row.userId}" aria-label="${escapeHtml(row.username)}のアカウント管理">管理</button>
+        </article>
       `).join("") || `<div class="empty-card">この条件の利用者データがありません</div>`}
     </div>
   `;
@@ -2057,7 +2069,7 @@ function updateAdminUserSearchResults(search) {
   const rows = filterAdminUsers(dashboard.userRows, {
     query: search.value,
     status: route.adminUserStatus || "all",
-    sort: route.adminUserSort || "attention",
+    sort: route.adminUserSort || "latest",
     direction: route.adminUserDirection === "asc" ? "asc" : "desc"
   });
   const results = view.querySelector("[data-admin-user-results]");
@@ -2068,10 +2080,100 @@ function updateAdminUserSearchResults(search) {
 
 function adminUserStatusChips(row) {
   const chips = [];
+  if (row.duplicateCount) chips.push(`<b class="support-chip duplicate">同名 ${row.duplicateCount + 1}件</b>`);
   if (row.recovery?.active) chips.push(`<b class="support-chip recovery">引き継ぎ ${row.recovery.matches}試合</b>`);
   if (row.stale) chips.push(`<b class="support-chip stale">長期未同期</b>`);
   if (row.empty) chips.push(`<b class="support-chip empty">記録なし</b>`);
   return chips.length ? `<span class="support-chip-row">${chips.join("")}</span>` : "";
+}
+
+function allAdminUserRows() {
+  return buildAdminDashboard(adminState.raw || {}, {
+    month: "",
+    environment: "",
+    recordType: "all",
+    excludePasses: false,
+    consentedOnly: false
+  }).userRows;
+}
+
+function adminAccountManagementMarkup(target) {
+  if (!target) return `<div class="empty-card">アカウント情報を確認できませんでした</div>`;
+  const duplicateRows = duplicateAdminUsers(allAdminUserRows(), target.userId);
+  const blockedByData = !target.deletable;
+  const blockedBySelf = target.userId === cloudStatus.userId;
+  const retainedOptions = duplicateRows.map((row) => `
+    <option value="${row.userId}">${escapeHtml(row.username)}・登録 ${formatAdminDate(row.createdAt)}・最終 ${formatAdminDate(row.lastUpdated)}・${row.decks}デッキ/${row.storedSessions}セッション/${row.storedMatches}試合</option>
+  `).join("");
+  return `
+    <section class="admin-account-management" data-admin-account-management>
+      <div class="admin-account-identity">
+        <div><strong>${escapeHtml(target.username)}</strong><span>ID …${escapeHtml(target.userId.slice(-8))}</span></div>
+        <dl>
+          <div><dt>登録</dt><dd>${formatAdminDate(target.createdAt)}</dd></div>
+          <div><dt>最終同期</dt><dd>${formatAdminDate(target.lastUpdated)}</dd></div>
+        </dl>
+      </div>
+      <div class="admin-account-counts" aria-label="削除対象の保存件数">
+        <span><strong>${target.decks}</strong>デッキ</span>
+        <span><strong>${target.storedSessions}</strong>セッション</span>
+        <span><strong>${target.storedMatches}</strong>試合</span>
+      </div>
+      ${duplicateRows.length ? `
+        <label>残す同名アカウント
+          <select name="retainedAdminUserId">
+            <option value="">選択してください</option>
+            ${retainedOptions}
+          </select>
+        </label>
+      ` : `<div class="admin-account-note"><strong>同名登録は見つかりません</strong><span>誤削除を防ぐため、残す同名アカウントがない場合は削除できません。</span></div>`}
+      ${blockedByData ? `
+        <div class="admin-account-note warning"><strong>このアカウントは削除できません</strong><span>保存済みの記録または引き継ぎ情報があります。データ統合機能を用意するまでは保持します。</span></div>
+      ` : blockedBySelf ? `
+        <div class="admin-account-note warning"><strong>管理者本人は削除できません</strong><span>操作中のアカウントを保護しています。</span></div>
+      ` : duplicateRows.length ? `
+        <div class="danger-zone admin-account-danger">
+          <strong>空アカウントを削除</strong>
+          <span>認証情報も削除され、元に戻せません。確認のため「${escapeHtml(target.username)}」と入力してください。</span>
+          <label>削除対象のユーザー名<input name="adminDeleteConfirmation" autocomplete="off"></label>
+          <p data-admin-account-delete-reason>残すアカウントを選択してください</p>
+          <button class="danger-button" type="button" data-delete-empty-admin-account disabled>この空アカウントを削除</button>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function managedAdminAccountContext() {
+  const rows = allAdminUserRows();
+  const target = rows.find((row) => row.userId === managedAdminUserId);
+  const retainedUserId = dialogFields.querySelector("select[name='retainedAdminUserId']")?.value || "";
+  const retained = rows.find((row) => row.userId === retainedUserId);
+  const confirmationUsername = dialogFields.querySelector("input[name='adminDeleteConfirmation']")?.value || "";
+  return {
+    target,
+    retained,
+    confirmationUsername,
+    deletion: adminAccountDeletionState({
+      target,
+      retained,
+      currentUserId: cloudStatus.userId,
+      confirmationUsername
+    })
+  };
+}
+
+function syncAdminAccountDeleteButton() {
+  if (dialogMode !== "adminAccount") return;
+  const button = dialogFields.querySelector("[data-delete-empty-admin-account]");
+  const reason = dialogFields.querySelector("[data-admin-account-delete-reason]");
+  if (!button) return;
+  const { deletion } = managedAdminAccountContext();
+  button.disabled = !deletion.allowed;
+  if (reason) {
+    reason.textContent = deletion.allowed ? "削除条件を確認しました" : deletion.reason;
+    reason.classList.toggle("ready", deletion.allowed);
+  }
 }
 
 function adminQualityMarkup(dashboard) {
@@ -2213,6 +2315,7 @@ function analysisRoute(overrides = {}) {
 function openDialog(mode, targetId = null) {
   updateSuggestions();
   dialogMode = mode;
+  managedAdminUserId = mode === "adminAccount" ? String(targetId || "") : managedAdminUserId;
   editingMatchId = mode === "match" ? targetId : null;
   editingSessionId = mode === "session" ? targetId : null;
   dialogFields.innerHTML = "";
@@ -2300,6 +2403,14 @@ function openDialog(mode, targetId = null) {
       <button class="sheet-back-button" type="button" data-open-menu-panel="dataSettings">‹ データ管理</button>
       ${playerNameTrimPreviewMarkup(previewPlayerNameHonorificTrim(state))}
     `;
+  }
+
+  if (mode === "adminAccount") {
+    dialogKicker.textContent = "Admin";
+    dialogTitle.textContent = "アカウント管理";
+    dialogSubmit.hidden = true;
+    const target = allAdminUserRows().find((row) => row.userId === managedAdminUserId);
+    dialogFields.innerHTML = adminAccountManagementMarkup(target);
   }
 
   if (mode === "session") {
@@ -2427,6 +2538,7 @@ function openDialog(mode, targetId = null) {
   entryForm.scrollTop = 0;
   if (dialogMode === "session") syncSessionRecordTypeFields();
   if (dialogMode === "match") syncRoundFormFields();
+  if (dialogMode === "adminAccount") syncAdminAccountDeleteButton();
   if (!dialog.open) dialog.showModal();
 }
 
@@ -2692,6 +2804,11 @@ view.addEventListener("click", (event) => {
     loadAdminDashboard();
     return;
   }
+  const adminAccountButton = event.target.closest("[data-manage-admin-user]");
+  if (adminAccountButton) {
+    openDialog("adminAccount", adminAccountButton.dataset.manageAdminUser);
+    return;
+  }
   const adminUserButton = event.target.closest("[data-open-admin-user]");
   if (adminUserButton) {
     openAdminUserPreview(adminUserButton.dataset.openAdminUser);
@@ -2911,6 +3028,7 @@ view.addEventListener("compositionend", (event) => {
 });
 
 dialogFields.addEventListener("change", (event) => {
+  if (event.target.closest("select[name='retainedAdminUserId']")) syncAdminAccountDeleteButton();
   const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput) updatePlayerNameSuggestions(playerInput);
   const sessionDeckSelect = event.target.closest("[data-session-deck-select]");
@@ -2932,6 +3050,7 @@ dialogFields.addEventListener("change", (event) => {
 });
 
 dialogFields.addEventListener("input", (event) => {
+  if (event.target.closest("input[name='adminDeleteConfirmation']")) syncAdminAccountDeleteButton();
   const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput && !event.isComposing) updatePlayerNameSuggestions(playerInput);
   const otpInput = event.target.closest("[data-auth-otp]");
@@ -2951,6 +3070,39 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  const deleteAdminAccountButton = event.target.closest("[data-delete-empty-admin-account]");
+  if (deleteAdminAccountButton) {
+    const context = managedAdminAccountContext();
+    if (!context.deletion.allowed || !context.target || !context.retained) {
+      syncAdminAccountDeleteButton();
+      return;
+    }
+    deleteAdminAccountButton.disabled = true;
+    deleteAdminAccountButton.textContent = "削除中...";
+    deleteAdminEmptyAccount({
+      targetUserId: context.target.userId,
+      retainedUserId: context.retained.userId,
+      confirmationUsername: context.confirmationUsername
+    })
+      .then(async () => {
+        adminAccountMessage = `空アカウント「${context.target.username}」を削除しました`;
+        managedAdminUserId = "";
+        dialog.close();
+        route = { ...route, name: "admin", adminTab: "users" };
+        await loadAdminDashboard();
+      })
+      .catch((error) => {
+        const reason = dialogFields.querySelector("[data-admin-account-delete-reason]");
+        if (reason) {
+          reason.textContent = adminAccountActionError(error);
+          reason.classList.remove("ready");
+        }
+        deleteAdminAccountButton.textContent = "この空アカウントを削除";
+        deleteAdminAccountButton.disabled = false;
+      });
+    return;
+  }
+
   const caseCardTrigger = event.target.closest("[data-open-case-card-picker]");
   if (caseCardTrigger) {
     openCaseCardDialog(caseCardTrigger.dataset.openCaseCardPicker);
@@ -3557,6 +3709,7 @@ initializeReleaseNotes();
 dialog.addEventListener("close", () => {
   closeCaseCardDialog();
   accountOnboardingActive = false;
+  if (dialogMode === "adminAccount") managedAdminUserId = "";
 });
 
 caseCardDialogClose.addEventListener("click", closeCaseCardDialog);
@@ -3830,6 +3983,16 @@ function environmentActionError(error) {
   if (message.includes("in use")) return "使用中の環境は削除できません。先に名称変更で別の環境へ統合してください。";
   if (message.includes("Administrator")) return "環境を変更できるのは管理者だけです。";
   return "環境マスターを更新できませんでした。通信状況を確認してください。";
+}
+
+function adminAccountActionError(error) {
+  const message = String(error?.message || "");
+  if (message.includes("ACCOUNT_NOT_EMPTY")) return "記録が見つかったため削除を中止しました。管理データを再読み込みしてください。";
+  if (message.includes("CANNOT_DELETE_SELF") || message.includes("CANNOT_DELETE_ADMIN")) return "管理者アカウントは削除できません。";
+  if (message.includes("DUPLICATE_ACCOUNT_MISMATCH") || message.includes("INVALID_ACCOUNT_SELECTION")) return "残す同名アカウントを確認してください。";
+  if (message.includes("USERNAME_CONFIRMATION_MISMATCH")) return "削除対象のユーザー名が一致していません。";
+  if (message.includes("admin_delete_empty_account") || error?.code === "PGRST202") return "Supabaseにアカウント管理用の設定が必要です。";
+  return "アカウントを削除できませんでした。通信状況を確認して再度お試しください。";
 }
 
 function stageRemoteReconciliation(remote) {

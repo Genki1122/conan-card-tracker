@@ -164,7 +164,7 @@ export function buildAiTrainingDataset(input) {
 export function filterAdminUsers(rows = [], filters = {}) {
   const query = String(filters.query || "").trim().toLocaleLowerCase("ja");
   const status = filters.status || "all";
-  const sort = filters.sort || "attention";
+  const sort = filters.sort || "latest";
   const direction = filters.direction === "asc" ? 1 : -1;
   const selected = rows.filter((row) => {
     if (query && !String(row.username || "").toLocaleLowerCase("ja").includes(query)) return false;
@@ -429,20 +429,31 @@ function buildDashboardUserRows({ profiles, states, records, sessions, consented
   const recoveryByUser = new Map(recoveries.map((row) => [row.user_id, row]));
   const staleCutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
   const userIds = [...new Set([...profiles.map((row) => row.user_id), ...states.map((row) => row.user_id)])];
-  return userIds.map((userId) => {
+  const rows = userIds.map((userId) => {
     const userRecords = records.filter((record) => record.userId === userId);
     const userSessions = sessions.filter((session) => session.userId === userId);
     const summary = recordSummary(userRecords);
     const stateRow = statesByUser.get(userId);
+    const profileRow = profilesByUser.get(userId) || {};
     const recoveryRow = recoveryByUser.get(userId) || {};
     const recoveryActive = ["detected", "reviewing", "saving", "failed"].includes(recoveryRow.status);
     const empty = summary.total === 0 && userSessions.length === 0;
     const stale = !stateRow?.updated_at || new Date(stateRow.updated_at).getTime() < staleCutoff;
+    const decks = stateRow?.data?.decks?.length || 0;
+    const storedSessions = stateRow?.data?.sessions?.length || 0;
+    const storedMatches = stateRow?.data?.matches?.length || 0;
+    const recoveryHasData = recoveryActive
+      || Number(recoveryRow.anonymous_decks || 0) > 0
+      || Number(recoveryRow.anonymous_sessions || 0) > 0
+      || Number(recoveryRow.anonymous_matches || 0) > 0;
     return {
       userId,
-      username: profilesByUser.get(userId)?.username || "未設定",
-      decks: stateRow?.data?.decks?.length || 0,
+      username: profileRow.username || "未設定",
+      createdAt: profileRow.created_at || "",
+      decks,
       sessions: userSessions.length,
+      storedSessions,
+      storedMatches,
       matches: summary.total,
       wins: summary.wins,
       losses: summary.losses,
@@ -451,6 +462,7 @@ function buildDashboardUserRows({ profiles, states, records, sessions, consented
       lastUpdated: stateRow?.updated_at || "",
       consented: consentedUsers.has(userId),
       empty,
+      deletable: decks === 0 && storedSessions === 0 && storedMatches === 0 && !recoveryHasData,
       stale,
       needsAttention: recoveryActive || stale || empty,
       recovery: {
@@ -464,7 +476,15 @@ function buildDashboardUserRows({ profiles, states, records, sessions, consented
         updatedAt: recoveryRow.updated_at || ""
       }
     };
-  }).sort((a, b) => String(b.lastUpdated).localeCompare(String(a.lastUpdated)));
+  });
+  const duplicateCounts = rows.reduce((counts, row) => {
+    const name = normalizeAdminUsername(row.username);
+    counts.set(name, (counts.get(name) || 0) + 1);
+    return counts;
+  }, new Map());
+  return rows
+    .map((row) => ({ ...row, duplicateCount: Math.max(0, (duplicateCounts.get(normalizeAdminUsername(row.username)) || 1) - 1) }))
+    .sort((a, b) => String(b.lastUpdated).localeCompare(String(a.lastUpdated)));
 }
 
 function compareAdminUsers(left, right, sort) {
@@ -480,6 +500,10 @@ function attentionScore(row) {
   if (row.stale) return 3;
   if (row.empty) return 2;
   return row.needsAttention ? 1 : 0;
+}
+
+function normalizeAdminUsername(value) {
+  return String(value || "").trim().toLocaleLowerCase("ja");
 }
 
 function buildUsageMetrics({ profiles, states, records, contextRecords, sessions, userRows, now }) {

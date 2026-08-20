@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { beginAdminPreview, endAdminPreview } from "../src/admin-view.js";
+import {
+  adminAccountDeletionState,
+  beginAdminPreview,
+  duplicateAdminUsers,
+  endAdminPreview
+} from "../src/admin-view.js";
 
 test("admin preview preserves the administrator state and exposes the selected user state", () => {
   const ownState = { decks: [{ id: "admin-deck" }], sessions: [], environments: [], matches: [] };
@@ -33,4 +38,55 @@ test("admin preview uses an empty state when the selected user has no cloud reco
     environments: [],
     matches: []
   });
+});
+
+test("duplicate account candidates require the same normalized username", () => {
+  const rows = [
+    { userId: "u1", username: " コナン ", createdAt: "2026-08-01" },
+    { userId: "u2", username: "コナン", createdAt: "2026-08-02" },
+    { userId: "u3", username: "こなん", createdAt: "2026-08-03" },
+    { userId: "u4", username: "平次", createdAt: "2026-08-04" }
+  ];
+
+  assert.deepEqual(duplicateAdminUsers(rows, "u1").map((row) => row.userId), ["u2"]);
+});
+
+test("only an empty non-admin duplicate can be deleted", () => {
+  const target = {
+    userId: "empty-user",
+    username: "コナン",
+    decks: 0,
+    storedSessions: 0,
+    storedMatches: 0,
+    recovery: { active: false, decks: 0, sessions: 0, matches: 0 }
+  };
+  const retained = { userId: "kept-user", username: "コナン" };
+
+  assert.deepEqual(adminAccountDeletionState({
+    target,
+    retained,
+    currentUserId: "admin",
+    confirmationUsername: "コナン"
+  }), { allowed: true, reason: "" });
+
+  assert.equal(adminAccountDeletionState({
+    target: { ...target, storedMatches: 1 },
+    retained,
+    currentUserId: "admin",
+    confirmationUsername: "コナン"
+  }).reason, "記録があるアカウントは削除できません");
+
+  assert.equal(adminAccountDeletionState({
+    target: { ...target, userId: "admin" },
+    retained,
+    currentUserId: "admin",
+    confirmationUsername: "コナン"
+  }).reason, "管理者本人は削除できません");
+
+  assert.equal(adminAccountDeletionState({
+    target,
+    retained: { userId: "other", username: "平次" },
+    currentUserId: "admin",
+    confirmationUsername: "コナン"
+  }).reason, "残すアカウントを確認してください");
 });

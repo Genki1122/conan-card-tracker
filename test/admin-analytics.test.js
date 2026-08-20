@@ -303,6 +303,38 @@ test("admin users can be searched, filtered, and sorted for support work", () =>
     sort: "matches",
     direction: "asc"
   }).map((row) => row.userId), ["u3", "u1", "u2"]);
+
+  assert.deepEqual(filterAdminUsers(rows).map((row) => row.userId), ["u2", "u1", "u3"]);
+});
+
+test("admin user rows expose stored record counts and exact-name duplicate counts", () => {
+  const dashboard = buildAdminDashboard({
+    profiles: [
+      { user_id: "u1", username: "コナン", created_at: "2026-07-01T00:00:00Z" },
+      { user_id: "u2", username: "コナン", created_at: "2026-07-02T00:00:00Z" }
+    ],
+    consents: [],
+    states: [{
+      user_id: "u1",
+      updated_at: "2026-07-20T00:00:00Z",
+      data: {
+        decks: [{ id: "d1" }],
+        sessions: [{ id: "s1", deckId: "d1", date: "2026-07-20" }],
+        matches: [{ sessionId: "s1", result: "pending" }]
+      }
+    }]
+  }, { recordType: "all" }, new Date("2026-07-22T00:00:00Z"));
+
+  const populated = dashboard.userRows.find((row) => row.userId === "u1");
+  const empty = dashboard.userRows.find((row) => row.userId === "u2");
+
+  assert.equal(populated.createdAt, "2026-07-01T00:00:00Z");
+  assert.equal(populated.storedSessions, 1);
+  assert.equal(populated.storedMatches, 1);
+  assert.equal(populated.duplicateCount, 1);
+  assert.equal(populated.deletable, false);
+  assert.equal(empty.duplicateCount, 1);
+  assert.equal(empty.deletable, true);
 });
 
 test("admin dashboard clears hidden filter values and counts privacy-safe player recording flags", () => {

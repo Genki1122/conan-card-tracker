@@ -223,6 +223,18 @@ export async function loadAdminUserState(userId) {
   return data?.[0] || null;
 }
 
+export async function deleteAdminEmptyAccount({ targetUserId, retainedUserId, confirmationUsername }) {
+  const supabase = await getClient();
+  requireUserId();
+  const { data, error } = await supabase.rpc("admin_delete_empty_account", {
+    target_user_id: targetUserId,
+    retained_user_id: retainedUserId,
+    confirmation_username: confirmationUsername
+  });
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
 export async function signOutCloud() {
   const supabase = await getClient();
   const { error } = await supabase.auth.signOut();
