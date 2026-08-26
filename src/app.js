@@ -125,6 +125,11 @@ import {
 } from "./matchup-detail.js";
 import { buildMonthlyReport } from "./monthly-report.js";
 import {
+  canShareMonthlyReport,
+  createMonthlyReportFiles,
+  monthlyShareText
+} from "./monthly-report-share.js";
+import {
   latestRelease,
   markReleaseSeen,
   normalizeReleaseManifest,
@@ -236,6 +241,7 @@ let caseCardReturnFocus = null;
 let releaseManifest = normalizeReleaseManifest();
 let releaseLoadPromise = null;
 let availableRelease = null;
+let monthlyShareState = { token: 0, files: [], urls: [], text: "", canShare: false };
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -1378,35 +1384,108 @@ function monthlyReportEntryMarkup(selectedMonth = "") {
   `;
 }
 
-function monthlyAwardItems(awards) {
-  return [
-    ["champion", "優勝", awards.champion],
-    ["second", "2位", awards.second],
-    ["top4", "ベスト4", awards.top4],
-    ["random", "ランダム", awards.random]
-  ].filter(([, , count]) => count > 0);
+function resetMonthlyShareState() {
+  monthlyShareState.urls.forEach((url) => URL.revokeObjectURL(url));
+  monthlyShareState = {
+    token: monthlyShareState.token + 1,
+    files: [],
+    urls: [],
+    text: "",
+    canShare: false
+  };
 }
 
-function monthlyAwardMarkup(awards) {
-  const items = monthlyAwardItems(awards);
-  if (!items.length) return `<span class="monthly-no-award">受賞記録なし</span>`;
-  return items.map(([tone, label, count]) => `
-    <span class="monthly-award ${tone}"><b>${escapeHtml(label)}</b><strong>${count}</strong></span>
-  `).join("");
+function updateMonthlyShareStatus(message, tone = "") {
+  const status = view.querySelector("[data-monthly-report-share-status]");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
 }
 
-function monthlyOutcomeMarkup(event) {
-  const outcomes = [];
-  const placement = placementLabels[event.placement] || event.placementNote;
-  const placementTone = ["champion", "second", "top4"].includes(event.placement) ? event.placement : "other";
-  if (placement) outcomes.push(`<span class="monthly-outcome ${placementTone}">${escapeHtml(placement)}</span>`);
-  if (event.randomPrizeWon && event.placement !== "champion") outcomes.push(`<span class="monthly-outcome random">ランダム</span>`);
-  return outcomes.join("");
+function showMonthlyPreviewImage(selector, url, alt) {
+  const slot = view.querySelector(selector);
+  if (!slot) return;
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = alt;
+  image.decoding = "async";
+  slot.replaceChildren(image);
+}
+
+async function prepareMonthlyReportShare(report, options) {
+  resetMonthlyShareState();
+  const token = monthlyShareState.token;
+  const button = view.querySelector("[data-monthly-report-share]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "画像を準備中";
+  }
+  updateMonthlyShareStatus("2枚の画像を準備しています...");
+
+  try {
+    const files = await createMonthlyReportFiles(report, { ...options, documentRef: document });
+    if (monthlyShareState.token !== token || route.name !== "monthlyReport") return;
+    const urls = files.map((file) => URL.createObjectURL(file));
+    const shareAvailable = canShareMonthlyReport(files, navigator);
+    monthlyShareState = {
+      token,
+      files,
+      urls,
+      text: monthlyShareText(report, options),
+      canShare: shareAvailable
+    };
+    showMonthlyPreviewImage("[data-monthly-report-summary-preview]", urls[0], `${options.monthLabel}の月間サマリー`);
+    showMonthlyPreviewImage("[data-monthly-report-history-preview]", urls[1], `${options.monthLabel}の大会履歴`);
+    if (button) {
+      button.disabled = false;
+      button.textContent = shareAvailable ? "Xへ共有" : "画像を保存";
+    }
+    updateMonthlyShareStatus(
+      shareAvailable
+        ? "準備完了。共有先でXを選択してください。"
+        : "このブラウザでは画像共有に対応していないため、2枚を保存します。",
+      "ready"
+    );
+  } catch (error) {
+    if (monthlyShareState.token !== token) return;
+    updateMonthlyShareStatus(`画像を準備できませんでした: ${error.message}`, "error");
+  }
+}
+
+function downloadMonthlyReportFiles() {
+  monthlyShareState.files.forEach((file, index) => {
+    const anchor = document.createElement("a");
+    anchor.href = monthlyShareState.urls[index] || URL.createObjectURL(file);
+    anchor.download = file.name;
+    anchor.click();
+  });
+  updateMonthlyShareStatus("2枚の画像を保存しました。", "ready");
+}
+
+function sharePreparedMonthlyReport() {
+  if (accountContext.role !== "superadmin" || adminPreview || !monthlyShareState.files.length) return;
+  if (!monthlyShareState.canShare) {
+    downloadMonthlyReportFiles();
+    return;
+  }
+
+  const sharePromise = navigator.share({
+    files: monthlyShareState.files,
+    text: monthlyShareState.text
+  });
+  Promise.resolve(sharePromise)
+    .then(() => updateMonthlyShareStatus("共有しました。", "ready"))
+    .catch((error) => {
+      if (error?.name !== "AbortError") {
+        updateMonthlyShareStatus(`共有できませんでした: ${error.message}`, "error");
+      }
+    });
 }
 
 function renderMonthlyReport() {
   title.textContent = "月間まとめ";
   if (accountContext.role !== "superadmin" || adminPreview) {
+    resetMonthlyShareState();
     view.innerHTML = `<div class="empty-card">この試作画面を表示する権限がありません</div>`;
     return;
   }
@@ -1423,7 +1502,6 @@ function renderMonthlyReport() {
   const [year, numericMonth] = selectedMonth.split("-");
   const reportMonth = `${Number(numericMonth)}月`;
   const profileName = accountContext.username || "PLAYER";
-  const visibleDecks = report.decks.slice(0, 4);
   const sessionUnit = selectedRecordType === "challenge" ? "大会" : "セッション";
   const historyTitle = selectedRecordType === "challenge"
     ? `${reportMonth} 参加大会`
@@ -1446,69 +1524,32 @@ function renderMonthlyReport() {
       </div>
     </div>
 
+    <section class="monthly-share-panel" aria-label="月間まとめを共有">
+      <button class="primary-button monthly-share-action" type="button" data-monthly-report-share disabled>画像を準備中</button>
+      <p data-monthly-report-share-status role="status">2枚の画像を準備しています...</p>
+    </section>
+
     <div class="monthly-sheet-heading"><span>投稿画像 1</span><strong>月間サマリー</strong></div>
-    <article class="monthly-share-sheet summary-sheet" aria-label="月間サマリー画像のプレビュー">
-      <header class="monthly-share-header">
-        <span><b>CONAN CARD</b> TRACKER</span>
-        <strong>${escapeHtml(year)}<i>.</i>${escapeHtml(numericMonth)}</strong>
-      </header>
-      <div class="monthly-share-title">
-        <span>${escapeHtml(profileName)} / ${escapeHtml(recordTypeLabel(selectedRecordType))}</span>
-        <h2>${escapeHtml(reportMonth)}の対戦記録</h2>
-      </div>
-      <section class="monthly-main-stats">
-        <div class="monthly-event-total"><strong>${report.sessionCount}</strong><span>${sessionUnit}</span></div>
-        <div class="monthly-record-total">
-          <span>MONTHLY RECORD</span>
-          <strong>${report.summary.wins}-${report.summary.losses}-${report.summary.draws}</strong>
-          <small>${report.summary.total}戦</small>
-        </div>
-        <div class="monthly-rate-total"><strong>${formatPercentage(report.summary.winRate)}</strong><span>勝率</span></div>
-      </section>
-      <div class="monthly-pass-line"><span>自分のパス率</span><strong>${formatPercentage(report.passUsage.rate)}</strong><small>${report.passUsage.used} / ${report.passUsage.total}戦</small></div>
-      <section class="monthly-awards">
-        <h3>RESULTS</h3>
-        <div>${monthlyAwardMarkup(report.awards)}</div>
-      </section>
-      <section class="monthly-decks">
-        <h3>USED DECKS</h3>
-        <div class="monthly-deck-list">
-          ${visibleDecks.map((deck, index) => `
-            <div class="monthly-deck-row">
-              <b>${String(index + 1).padStart(2, "0")}</b>
-              <span><strong>${escapeHtml(deck.name)}</strong><small>${deck.sessions}${sessionUnit}・${deck.total}戦</small></span>
-              <span><strong>${deck.wins}-${deck.losses}-${deck.draws}</strong><small>${formatPercentage(deck.winRate)}</small></span>
-            </div>
-          `).join("") || `<p class="monthly-empty">この月の記録はありません</p>`}
-          ${report.decks.length > visibleDecks.length ? `<p class="monthly-more">ほか ${report.decks.length - visibleDecks.length}デッキ</p>` : ""}
-        </div>
-      </section>
-      <footer><span>#コナカノート</span><b>MONTHLY REPORT</b></footer>
-    </article>
+    <figure class="monthly-generated-preview summary" data-monthly-report-summary-preview aria-label="月間サマリー画像のプレビュー">
+      <span class="monthly-image-loading">生成中...</span>
+    </figure>
 
     <div class="monthly-sheet-heading"><span>投稿画像 2</span><strong>大会履歴</strong></div>
-    <article class="monthly-share-sheet history-sheet" aria-label="大会履歴画像のプレビュー">
-      <header class="monthly-share-header">
-        <span><b>EVENT</b> ARCHIVE</span>
-        <strong>${escapeHtml(year)}<i>.</i>${escapeHtml(numericMonth)}</strong>
-      </header>
-      <div class="monthly-history-title">
-        <div><span>${escapeHtml(profileName)}</span><h2>${escapeHtml(historyTitle)}</h2></div>
-        <strong>${report.sessionCount}<small>${sessionUnit}</small></strong>
-      </div>
-      <div class="monthly-event-list">
-        ${report.events.map((event) => `
-          <div class="monthly-event-row">
-            <time>${formatDate(event.date)}</time>
-            <span class="monthly-event-copy"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(event.deckName)}</small></span>
-            <span class="monthly-event-result ${recordToneClass(event.record)}"><strong>${event.record.wins}-${event.record.losses}-${event.record.draws || 0}</strong>${monthlyOutcomeMarkup(event)}</span>
-          </div>
-        `).join("") || `<p class="monthly-empty">この月の大会記録はありません</p>`}
-      </div>
-      <footer><span>#コナカノート</span><b>${escapeHtml(recordTypeLabel(selectedRecordType))}</b></footer>
-    </article>
-    <p class="monthly-preview-footnote">共有機能はレビュー後に有効化します。現在は表示内容と情報量の確認用です。</p>
+    <figure class="monthly-generated-preview history" data-monthly-report-history-preview aria-label="大会履歴画像のプレビュー">
+      <span class="monthly-image-loading">生成中...</span>
+    </figure>
+    ${report.events.length > 30 ? `<p class="monthly-history-note">投稿画像2は最新30${sessionUnit}を表示します。残り${report.events.length - 30}${sessionUnit}は画像内に件数を記載します。</p>` : ""}
   `;
+
+  prepareMonthlyReportShare(report, {
+    month: selectedMonth,
+    monthLabel: reportMonth,
+    monthCode: `${year}.${numericMonth}`,
+    username: profileName,
+    recordTypeLabel: recordTypeLabel(selectedRecordType),
+    sessionUnit,
+    historyTitle
+  });
 }
 
 function analysisMatchesForCurrentRoute() {
@@ -2412,6 +2453,7 @@ function formatAdminDate(value) {
 function render() {
   updateSuggestions();
   renderSyncStatus();
+  if (route.name !== "monthlyReport" && monthlyShareState.urls.length) resetMonthlyShareState();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
   const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "matchupDetail", "monthlyReport", "admin", "recovery", "repair"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
@@ -2902,6 +2944,11 @@ entryForm.addEventListener("submit", (event) => {
 });
 
 view.addEventListener("click", (event) => {
+  const monthlyShareButton = event.target.closest("[data-monthly-report-share]");
+  if (monthlyShareButton) {
+    sharePreparedMonthlyReport();
+    return;
+  }
   const monthlyReportButton = event.target.closest("[data-open-monthly-report]");
   if (monthlyReportButton) {
     if (accountContext.role !== "superadmin" || adminPreview) return;

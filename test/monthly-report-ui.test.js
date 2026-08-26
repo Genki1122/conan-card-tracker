@@ -14,7 +14,7 @@ test("monthly report preview is reachable only from the superadmin analysis view
   assert.match(appSource, /if \(route\.name === "monthlyReport"\) renderMonthlyReport\(\)/);
 });
 
-test("monthly report preview renders separate summary and event-history share sheets", async () => {
+test("monthly report preview renders the exact generated images and admin-only share controls", async () => {
   const [appSource, styles] = await Promise.all([
     readFile(new URL("src/app.js", rootUrl), "utf8"),
     readFile(new URL("styles.css", rootUrl), "utf8")
@@ -22,9 +22,11 @@ test("monthly report preview renders separate summary and event-history share sh
 
   assert.match(appSource, /data-monthly-report-month/);
   assert.match(appSource, /data-monthly-report-record-type/);
-  assert.match(appSource, /monthly-share-sheet summary-sheet/);
-  assert.match(appSource, /monthly-share-sheet history-sheet/);
-  assert.match(appSource, /共有機能はレビュー後に有効化/);
-  assert.match(styles, /\.monthly-share-sheet/);
-  assert.match(styles, /\.monthly-event-row/);
+  assert.match(appSource, /createMonthlyReportFiles/);
+  assert.match(appSource, /data-monthly-report-share/);
+  assert.match(appSource, /data-monthly-report-summary-preview/);
+  assert.match(appSource, /data-monthly-report-history-preview/);
+  assert.match(appSource, /navigator\.share/);
+  assert.match(styles, /\.monthly-generated-preview/);
+  assert.match(styles, /\.monthly-share-action/);
 });
