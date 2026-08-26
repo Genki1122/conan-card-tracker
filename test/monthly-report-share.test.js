@@ -3,10 +3,10 @@ import test from "node:test";
 
 import {
   buildMonthlyHistoryRows,
-  canShareMonthlyReport,
   historyImageLayout,
   monthlyOutcomeLabel,
   monthlyOutcomeTone,
+  monthlySummaryStats,
   monthlyShareText
 } from "../src/monthly-report-share.js";
 
@@ -75,16 +75,17 @@ test("share text summarizes the month and leaves final editing to the user", () 
   }), "8月の対戦記録\nチャレンジ 25大会 73-24-0\n勝率 75.3%\n#コナカノート");
 });
 
-test("file sharing capability checks fail closed on unsupported browsers", () => {
-  const files = [{ name: "summary.png" }, { name: "events.png" }];
+test("summary stats keep secondary counts beside labels so primary values can stay large", () => {
+  const report = {
+    sessionCount: 25,
+    summary: { wins: 85, losses: 21, draws: 0, total: 106, winRate: 80.2 },
+    passUsage: { used: 12, total: 106, rate: 11.3 }
+  };
 
-  assert.equal(canShareMonthlyReport(files, {}), false);
-  assert.equal(canShareMonthlyReport(files, {
-    share() {},
-    canShare() { return true; }
-  }), true);
-  assert.equal(canShareMonthlyReport(files, {
-    share() {},
-    canShare() { throw new TypeError("unsupported files"); }
-  }), false);
+  assert.deepEqual(monthlySummaryStats(report, { sessionUnit: "大会" }), [
+    { label: "参加大会", meta: "", value: "25大会" },
+    { label: "戦績", meta: "106戦", value: "85-21-0" },
+    { label: "勝率", meta: "", value: "80.2%" },
+    { label: "パス率", meta: "12回", value: "11.3%" }
+  ]);
 });

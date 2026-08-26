@@ -98,6 +98,31 @@ export function monthlyShareText(report = {}, {
   ].join("\n");
 }
 
+export function monthlySummaryStats(report = {}, { sessionUnit = "大会" } = {}) {
+  return [
+    {
+      label: `参加${sessionUnit}`,
+      meta: "",
+      value: `${number(report.sessionCount)}${sessionUnit}`
+    },
+    {
+      label: "戦績",
+      meta: `${number(report.summary?.total)}戦`,
+      value: recordText(report.summary)
+    },
+    {
+      label: "勝率",
+      meta: "",
+      value: percentage(report.summary?.winRate)
+    },
+    {
+      label: "パス率",
+      meta: `${number(report.passUsage?.used)}回`,
+      value: percentage(report.passUsage?.rate)
+    }
+  ];
+}
+
 function setFont(context, size, weight = 700) {
   context.font = `${weight} ${size}px ${fontFamily}`;
 }
@@ -164,30 +189,21 @@ function drawBrandHeader(context, label, monthCode) {
   drawText(context, monthCode, 1026, 124, { size: 32, weight: 900, align: "right" });
 }
 
-function drawStat(context, x, width, label, value, note = "", valueSize = 52) {
-  drawText(context, label, x, 310, { size: 21, weight: 800, color: colors.muted });
+function drawStat(context, x, width, stat, valueSize = 52) {
+  drawText(context, stat.label, x, 310, { size: 21, weight: 800, color: colors.muted });
+  if (stat.meta) {
+    setFont(context, 21, 800);
+    const labelWidth = context.measureText(stat.label).width;
+    drawText(context, stat.meta, x + labelWidth + 8, 310, { size: 17, weight: 800, color: colors.muted });
+  }
   let primarySize = valueSize;
-  let noteSize = 18;
-  let primaryWidth = 0;
-  let noteWidth = 0;
   do {
     setFont(context, primarySize, 900);
-    primaryWidth = context.measureText(value).width;
-    setFont(context, noteSize, 800);
-    noteWidth = note ? context.measureText(`・${note}`).width : 0;
-    if (primaryWidth + noteWidth <= width || primarySize <= 34) break;
+    if (context.measureText(stat.value).width <= width || primarySize <= 34) break;
     primarySize -= 2;
-    noteSize = Math.max(15, noteSize - 0.5);
   } while (primarySize > 34);
 
-  drawText(context, value, x, 382, { size: primarySize, weight: 900 });
-  if (note) {
-    drawText(context, `・${note}`, x + primaryWidth + 6, 382, {
-      size: noteSize,
-      weight: 800,
-      color: colors.muted
-    });
-  }
+  drawText(context, stat.value, x, 382, { size: primarySize, weight: 900 });
 }
 
 function awardItems(awards = {}) {
@@ -317,10 +333,11 @@ export function renderMonthlySummaryCanvas(report = {}, {
   drawText(context, recordTypeLabel, 1026, 218, { size: 26, weight: 800, color: colors.muted, align: "right" });
   drawDivider(context, 248);
 
-  drawStat(context, 54, 190, `参加${sessionUnit}`, `${number(report.sessionCount)}${sessionUnit}`, `${number(report.summary?.total)}戦`, 48);
-  drawStat(context, 264, 330, "戦績", recordText(report.summary), "", 56);
-  drawStat(context, 615, 190, "勝率", percentage(report.summary?.winRate), "", 52);
-  drawStat(context, 825, 201, "パス率", percentage(report.passUsage?.rate), `${number(report.passUsage?.used)}/${number(report.passUsage?.total)}戦`, 48);
+  const stats = monthlySummaryStats(report, { sessionUnit });
+  drawStat(context, 54, 190, stats[0], 52);
+  drawStat(context, 264, 330, stats[1], 58);
+  drawStat(context, 615, 190, stats[2], 54);
+  drawStat(context, 825, 201, stats[3], 54);
 
   drawDivider(context, 430);
   drawText(context, "大会結果", 54, 476, { size: 24, weight: 900 });
@@ -470,13 +487,4 @@ export async function createMonthlyReportFiles(report = {}, options = {}) {
     new FileCtor([summaryBlob], `conan-note-${slug}-summary.png`, { type: "image/png" }),
     new FileCtor([historyBlob], `conan-note-${slug}-events.png`, { type: "image/png" })
   ];
-}
-
-export function canShareMonthlyReport(files, navigatorRef = navigator) {
-  if (!navigatorRef?.share || !navigatorRef?.canShare) return false;
-  try {
-    return Boolean(navigatorRef.canShare({ files }));
-  } catch {
-    return false;
-  }
 }

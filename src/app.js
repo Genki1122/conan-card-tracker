@@ -125,7 +125,6 @@ import {
 } from "./matchup-detail.js";
 import { buildMonthlyReport } from "./monthly-report.js";
 import {
-  canShareMonthlyReport,
   createMonthlyReportFiles,
   monthlyShareText
 } from "./monthly-report-share.js";
@@ -241,7 +240,7 @@ let caseCardReturnFocus = null;
 let releaseManifest = normalizeReleaseManifest();
 let releaseLoadPromise = null;
 let availableRelease = null;
-let monthlyShareState = { token: 0, files: [], urls: [], text: "", canShare: false };
+let monthlyShareState = { token: 0, files: [], urls: [], text: "" };
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
@@ -1390,8 +1389,7 @@ function resetMonthlyShareState() {
     token: monthlyShareState.token + 1,
     files: [],
     urls: [],
-    text: "",
-    canShare: false
+    text: ""
   };
 }
 
@@ -1426,60 +1424,28 @@ async function prepareMonthlyReportShare(report, options) {
     const files = await createMonthlyReportFiles(report, { ...options, documentRef: document });
     if (monthlyShareState.token !== token || route.name !== "monthlyReport") return;
     const urls = files.map((file) => URL.createObjectURL(file));
-    const shareAvailable = canShareMonthlyReport(files, navigator);
     monthlyShareState = {
       token,
       files,
       urls,
-      text: monthlyShareText(report, options),
-      canShare: shareAvailable
+      text: monthlyShareText(report, options)
     };
     showMonthlyPreviewImage("[data-monthly-report-summary-preview]", urls[0], `${options.monthLabel}の月間サマリー`);
     showMonthlyPreviewImage("[data-monthly-report-history-preview]", urls[1], `${options.monthLabel}の大会履歴`);
     if (button) {
       button.disabled = false;
-      button.textContent = shareAvailable ? "Xへ共有" : "画像を保存";
+      button.textContent = "画像を保存してXへ投稿";
     }
-    updateMonthlyShareStatus(
-      shareAvailable
-        ? "準備完了。共有先でXを選択してください。"
-        : "このブラウザでは画像共有に対応していないため、2枚を保存します。",
-      "ready"
-    );
+    updateMonthlyShareStatus("準備完了。投稿画像1・2を長押しして端末へ保存してください。", "ready");
   } catch (error) {
     if (monthlyShareState.token !== token) return;
     updateMonthlyShareStatus(`画像を準備できませんでした: ${error.message}`, "error");
   }
 }
 
-function downloadMonthlyReportFiles() {
-  monthlyShareState.files.forEach((file, index) => {
-    const anchor = document.createElement("a");
-    anchor.href = monthlyShareState.urls[index] || URL.createObjectURL(file);
-    anchor.download = file.name;
-    anchor.click();
-  });
-  updateMonthlyShareStatus("2枚の画像を保存しました。", "ready");
-}
-
-function sharePreparedMonthlyReport() {
+function openMonthlyShareGuide() {
   if (accountContext.role !== "superadmin" || adminPreview || !monthlyShareState.files.length) return;
-  if (!monthlyShareState.canShare) {
-    downloadMonthlyReportFiles();
-    return;
-  }
-
-  const sharePromise = navigator.share({
-    files: monthlyShareState.files,
-    text: monthlyShareState.text
-  });
-  Promise.resolve(sharePromise)
-    .then(() => updateMonthlyShareStatus("共有しました。", "ready"))
-    .catch((error) => {
-      if (error?.name !== "AbortError") {
-        updateMonthlyShareStatus(`共有できませんでした: ${error.message}`, "error");
-      }
-    });
+  openDialog("monthlyShareGuide");
 }
 
 function renderMonthlyReport() {
@@ -1524,8 +1490,7 @@ function renderMonthlyReport() {
       </div>
     </div>
 
-    <section class="monthly-share-panel" aria-label="月間まとめを共有">
-      <button class="primary-button monthly-share-action" type="button" data-monthly-report-share disabled>画像を準備中</button>
+    <section class="monthly-share-panel monthly-share-prep" aria-label="月間まとめ画像の準備状況">
       <p data-monthly-report-share-status role="status">2枚の画像を準備しています...</p>
     </section>
 
@@ -1539,6 +1504,10 @@ function renderMonthlyReport() {
       <span class="monthly-image-loading">生成中...</span>
     </figure>
     ${report.events.length > 30 ? `<p class="monthly-history-note">投稿画像2は最新30${sessionUnit}を表示します。残り${report.events.length - 30}${sessionUnit}は画像内に件数を記載します。</p>` : ""}
+    <section class="monthly-share-panel monthly-share-final" aria-label="月間まとめをXへ投稿">
+      <p>投稿画像1・2を長押しして保存したあと、Xの投稿画面で2枚を添付してください。</p>
+      <button class="primary-button monthly-share-action" type="button" data-monthly-report-share disabled>画像を準備中</button>
+    </section>
   `;
 
   prepareMonthlyReportShare(report, {
@@ -2594,6 +2563,26 @@ function openDialog(mode, targetId = null) {
     `;
   }
 
+  if (mode === "monthlyShareGuide") {
+    dialogKicker.textContent = "Share";
+    dialogTitle.textContent = "Xへ投稿";
+    dialogSubmit.hidden = true;
+    const shareUrl = buildXShareUrl(monthlyShareState.text);
+    dialogFields.innerHTML = `
+      <section class="monthly-share-guide" data-monthly-share-guide>
+        <strong>画像2枚は保存できましたか？</strong>
+        <p>まだの場合はこの画面を閉じ、投稿画像1と2をそれぞれ長押しして端末へ保存してください。</p>
+        <ol>
+          <li>画像2枚を端末へ保存</li>
+          <li>Xの投稿画面を開く</li>
+          <li>保存した画像1・2を添付して投稿</li>
+        </ol>
+        <button class="primary-button inline-action" type="button" data-open-monthly-x="${escapeHtml(shareUrl)}">Xの投稿画面を開く</button>
+        <button class="primary-button inline-action ghost-action" type="button" data-close-monthly-share-guide>戻って画像を保存</button>
+      </section>
+    `;
+  }
+
   if (mode === "playerNameTrimPreview") {
     dialogKicker.textContent = "Data";
     dialogTitle.textContent = "変更内容を確認";
@@ -2946,7 +2935,7 @@ entryForm.addEventListener("submit", (event) => {
 view.addEventListener("click", (event) => {
   const monthlyShareButton = event.target.closest("[data-monthly-report-share]");
   if (monthlyShareButton) {
-    sharePreparedMonthlyReport();
+    openMonthlyShareGuide();
     return;
   }
   const monthlyReportButton = event.target.closest("[data-open-monthly-report]");
@@ -3301,6 +3290,17 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-monthly-share-guide]")) {
+    dialog.close();
+    return;
+  }
+  const monthlyXButton = event.target.closest("[data-open-monthly-x]");
+  if (monthlyXButton) {
+    dialog.close();
+    window.open(monthlyXButton.dataset.openMonthlyX, "_blank", "noopener");
+    return;
+  }
+
   const deleteAdminAccountButton = event.target.closest("[data-delete-empty-admin-account]");
   if (deleteAdminAccountButton) {
     const context = managedAdminAccountContext();
