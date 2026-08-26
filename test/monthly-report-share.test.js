@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildMonthlyHistoryRows,
   historyImageLayout,
+  monthlyDeckTurnLine,
   monthlyOutcomeLabel,
   monthlyOutcomeTone,
   monthlySummaryStats,
@@ -88,4 +89,16 @@ test("summary stats keep secondary counts beside labels so primary values can st
     { label: "勝率", meta: "", value: "80.2%" },
     { label: "パス率", meta: "12回", value: "11.3%" }
   ]);
+});
+
+test("deck turn line shows first and second win rates with their sample sizes", () => {
+  assert.equal(monthlyDeckTurnLine({
+    first: { total: 50, winRate: 78 },
+    second: { total: 35, winRate: 86.4 }
+  }), "先 78.0%（50戦）｜後 86.4%（35戦）");
+
+  assert.equal(monthlyDeckTurnLine({
+    first: { total: 0, winRate: 0 },
+    second: { total: 1, winRate: 100 }
+  }), "先 --（0戦）｜後 100.0%（1戦）");
 });

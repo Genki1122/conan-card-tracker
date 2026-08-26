@@ -108,3 +108,27 @@ test("monthly report groups completed records by opponent color for each deck", 
   ]);
   assert.equal(hayate.opponentColors.find((color) => color.id === "blue").winRate, 100);
 });
+
+test("monthly report includes first and second records for each deck", () => {
+  const report = buildMonthlyReport(state, { month: "2026-08", recordType: "challenge" });
+  const onimaru = report.decks.find((deck) => deck.id === "deck-a");
+  const hayate = report.decks.find((deck) => deck.id === "deck-b");
+
+  assert.deepEqual(onimaru.first, {
+    total: 1,
+    wins: 1,
+    losses: 0,
+    draws: 0,
+    winRate: 100
+  });
+  assert.deepEqual(onimaru.second, {
+    total: 1,
+    wins: 0,
+    losses: 1,
+    draws: 0,
+    winRate: 0
+  });
+  assert.equal(hayate.first.total, 0);
+  assert.equal(hayate.second.total, 1);
+  assert.equal(hayate.second.winRate, 100);
+});

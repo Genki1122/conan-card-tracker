@@ -123,6 +123,16 @@ export function monthlySummaryStats(report = {}, { sessionUnit = "大会" } = {}
   ];
 }
 
+function deckTurnStat(label, record = {}) {
+  const total = number(record.total);
+  const rate = total ? percentage(record.winRate) : "--";
+  return `${label} ${rate}（${total}戦）`;
+}
+
+export function monthlyDeckTurnLine(deck = {}) {
+  return `${deckTurnStat("先", deck.first)}｜${deckTurnStat("後", deck.second)}`;
+}
+
 function setFont(context, size, weight = 700) {
   context.font = `${weight} ${size}px ${fontFamily}`;
 }
@@ -239,7 +249,7 @@ const opponentColorTones = {
   black: "#77717f"
 };
 
-function drawColorMatrix(context, decks, usage, top) {
+function drawColorMatrix(context, decks, usage, top, { compact = false } = {}) {
   const visibleDecks = decks.slice(0, 4);
   const title = decks.length > visibleDecks.length ? "対面色別勝率（上位4デッキ）" : "対面色別勝率";
   drawText(context, title, 54, top, { size: 24, weight: 900 });
@@ -256,7 +266,8 @@ function drawColorMatrix(context, decks, usage, top) {
   const columnWidth = gridWidth / 6;
   const headerY = top + 38;
   const rowStart = top + 54;
-  const rowHeight = 56;
+  const rowHeight = compact ? 44 : 56;
+  const cellHeight = compact ? 38 : 48;
   const colorRows = visibleDecks[0]?.opponentColors || [];
 
   colorRows.forEach((color, index) => {
@@ -275,30 +286,34 @@ function drawColorMatrix(context, decks, usage, top) {
 
   visibleDecks.forEach((deck, rowIndex) => {
     const y = rowStart + (rowIndex * rowHeight);
-    drawText(context, deck.name, 54, y + 35, { size: 22, weight: 900, maxWidth: labelWidth - 12 });
+    drawText(context, deck.name, 54, y + (compact ? 29 : 35), {
+      size: compact ? 19 : 22,
+      weight: 900,
+      maxWidth: labelWidth - 12
+    });
     (deck.opponentColors || []).forEach((color, columnIndex) => {
       const x = gridLeft + (columnWidth * columnIndex) + 5;
       const width = columnWidth - 10;
-      drawRoundedRect(context, x, y + 2, width, 48, 6, {
+      drawRoundedRect(context, x, y + 2, width, cellHeight, 6, {
         fill: colors.panel,
         stroke: color.total ? opponentColorTones[color.id] : colors.line
       });
       if (!number(color.total)) {
-        drawText(context, "–", x + (width / 2), y + 33, {
-          size: 20,
+        drawText(context, "–", x + (width / 2), y + (compact ? 27 : 33), {
+          size: compact ? 17 : 20,
           weight: 800,
           color: colors.muted,
           align: "center"
         });
         return;
       }
-      drawText(context, percentage(color.winRate), x + (width / 2), y + 24, {
-        size: 19,
+      drawText(context, percentage(color.winRate), x + (width / 2), y + (compact ? 20 : 24), {
+        size: compact ? 16 : 19,
         weight: 900,
         align: "center"
       });
-      drawText(context, `${number(color.total)}戦`, x + (width / 2), y + 43, {
-        size: 14,
+      drawText(context, `${number(color.total)}戦`, x + (width / 2), y + (compact ? 35 : 43), {
+        size: compact ? 12 : 14,
         weight: 800,
         color: colors.muted,
         align: "center"
@@ -362,18 +377,25 @@ export function renderMonthlySummaryCanvas(report = {}, {
     drawText(context, "この月の対戦記録はありません", 54, 678, { size: 28, color: colors.muted });
   }
   decks.forEach((deck, index) => {
-    const y = 628 + (index * 52);
-    drawText(context, String(index + 1).padStart(2, "0"), 54, y + 32, { size: 20, weight: 900, color: colors.gold });
-    drawText(context, deck.name, 105, y + 32, { size: 25, weight: 900, maxWidth: 440 });
-    drawText(context, `${number(deck.sessions)}${sessionUnit}`, 660, y + 32, { size: 21, weight: 800, color: colors.muted, align: "right" });
-    drawText(context, recordText(deck), 850, y + 32, { size: 23, weight: 900, color: recordColor(deck), align: "right" });
-    drawText(context, percentage(deck.winRate), 1026, y + 32, { size: 23, weight: 900, align: "right" });
-    drawDivider(context, y + 48);
+    const y = 628 + (index * 60);
+    drawText(context, String(index + 1).padStart(2, "0"), 54, y + 25, { size: 19, weight: 900, color: colors.gold });
+    drawText(context, deck.name, 105, y + 25, { size: 23, weight: 900, maxWidth: 440 });
+    drawText(context, `${number(deck.sessions)}${sessionUnit}`, 660, y + 25, { size: 20, weight: 800, color: colors.muted, align: "right" });
+    drawText(context, recordText(deck), 850, y + 25, { size: 22, weight: 900, color: recordColor(deck), align: "right" });
+    drawText(context, percentage(deck.winRate), 1026, y + 25, { size: 22, weight: 900, align: "right" });
+    drawText(context, monthlyDeckTurnLine(deck), 105, y + 49, {
+      size: 16,
+      weight: 800,
+      color: colors.muted,
+      maxWidth: 560
+    });
+    drawDivider(context, y + 58);
   });
 
   if (decks.length) {
-    const matrixTop = Math.min(960, 840 + (decks.length * 20));
-    drawColorMatrix(context, decks, report.opponentColorUsage, matrixTop);
+    const compactMatrix = decks.length > 4;
+    const matrixTop = Math.min(1026, 810 + (decks.length * 36));
+    drawColorMatrix(context, decks, report.opponentColorUsage, matrixTop, { compact: compactMatrix });
   }
 
   drawText(context, "#コナカノート", 54, 1294, { size: 24, weight: 900, color: colors.gold });

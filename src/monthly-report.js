@@ -55,6 +55,8 @@ export function buildMonthlyReport(state = {}, { month = "", recordType = "chall
     name: decksById.get(deckId)?.name || "デッキ未設定",
     sessions: group.sessions.length,
     ...reportSummary(group.matches),
+    first: reportSummary(group.matches.filter((match) => match.firstPlayer === "first")),
+    second: reportSummary(group.matches.filter((match) => match.firstPlayer === "second")),
     opponentColors: opponentColorRecords(group.matches)
   })).sort((left, right) => (
     right.total - left.total
