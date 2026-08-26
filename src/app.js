@@ -123,6 +123,7 @@ import {
   filterMatchupRecords,
   passBadgeItems
 } from "./matchup-detail.js";
+import { buildMonthlyReport } from "./monthly-report.js";
 import {
   latestRelease,
   markReleaseSeen,
@@ -1297,6 +1298,7 @@ function renderSummary() {
       </details>
       <label class="analysis-pass-toggle"><input type="checkbox" data-analysis-exclude-passes ${excludePasses ? "checked" : ""}><span>パスを除く</span></label>
     </div>
+    ${monthlyReportEntryMarkup(selectedMonth)}
 
     <section class="analysis-hero">
       <div>
@@ -1353,6 +1355,159 @@ function renderSummary() {
             </button>
           `).join("") || `<div class="empty-card">この条件に合う試合記録がありません</div>`}
         </div>`}
+  `;
+}
+
+function latestMonthlyReportMonth(recordType = "challenge") {
+  const recordedMonths = filterSessionsByRecordType(state.sessions, recordType)
+    .map((session) => String(session.date || "").slice(0, 7))
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  return recordedMonths[0] || relativeMonth(0);
+}
+
+function monthlyReportEntryMarkup(selectedMonth = "") {
+  if (accountContext.role !== "superadmin" || adminPreview) return "";
+  const month = selectedMonth || latestMonthlyReportMonth("challenge");
+  return `
+    <button class="monthly-report-entry" type="button" data-open-monthly-report="${escapeHtml(month)}">
+      <span><b>ADMIN PREVIEW</b><strong>${formatMonth(month)}のまとめ</strong></span>
+      <span>共有イメージを見る <b aria-hidden="true">›</b></span>
+    </button>
+  `;
+}
+
+function monthlyAwardItems(awards) {
+  return [
+    ["champion", "優勝", awards.champion],
+    ["second", "2位", awards.second],
+    ["top4", "ベスト4", awards.top4],
+    ["random", "ランダム", awards.random]
+  ].filter(([, , count]) => count > 0);
+}
+
+function monthlyAwardMarkup(awards) {
+  const items = monthlyAwardItems(awards);
+  if (!items.length) return `<span class="monthly-no-award">受賞記録なし</span>`;
+  return items.map(([tone, label, count]) => `
+    <span class="monthly-award ${tone}"><b>${escapeHtml(label)}</b><strong>${count}</strong></span>
+  `).join("");
+}
+
+function monthlyOutcomeMarkup(event) {
+  const outcomes = [];
+  const placement = placementLabels[event.placement] || event.placementNote;
+  const placementTone = ["champion", "second", "top4"].includes(event.placement) ? event.placement : "other";
+  if (placement) outcomes.push(`<span class="monthly-outcome ${placementTone}">${escapeHtml(placement)}</span>`);
+  if (event.randomPrizeWon && event.placement !== "champion") outcomes.push(`<span class="monthly-outcome random">ランダム</span>`);
+  return outcomes.join("");
+}
+
+function renderMonthlyReport() {
+  title.textContent = "月間まとめ";
+  if (accountContext.role !== "superadmin" || adminPreview) {
+    view.innerHTML = `<div class="empty-card">この試作画面を表示する権限がありません</div>`;
+    return;
+  }
+
+  const selectedRecordType = normalizeRecordType(route.recordType);
+  const months = analysisMonths(selectedRecordType);
+  const selectedMonth = route.month && months.includes(route.month)
+    ? route.month
+    : latestMonthlyReportMonth(selectedRecordType);
+  const report = buildMonthlyReport(state, {
+    month: selectedMonth,
+    recordType: selectedRecordType
+  });
+  const [year, numericMonth] = selectedMonth.split("-");
+  const reportMonth = `${Number(numericMonth)}月`;
+  const profileName = accountContext.username || "PLAYER";
+  const visibleDecks = report.decks.slice(0, 4);
+  const sessionUnit = selectedRecordType === "challenge" ? "大会" : "セッション";
+  const historyTitle = selectedRecordType === "challenge"
+    ? `${reportMonth} 参加大会`
+    : `${reportMonth} ${recordTypeLabel(selectedRecordType)}記録`;
+
+  view.innerHTML = `
+    <section class="monthly-preview-intro">
+      <span>管理者限定プレビュー</span>
+      <strong>月間まとめの共有イメージ</strong>
+      <p>実データを使った表示試作です。一般利用者には表示されません。</p>
+    </section>
+    <div class="monthly-report-controls">
+      <label><span>対象月</span><select data-monthly-report-month>
+        ${months.map((month) => `<option value="${month}" ${month === selectedMonth ? "selected" : ""}>${formatMonthOption(month)}</option>`).join("")}
+      </select></label>
+      <div class="record-type-tabs monthly-record-type-tabs" role="tablist" aria-label="記録種別">
+        ${[["challenge", "チャレンジ"], ["free", "フリー"], ["tuning", "調整"]].map(([value, label]) => `
+          <button type="button" role="tab" data-monthly-report-record-type="${value}" aria-selected="${selectedRecordType === value}" class="${selectedRecordType === value ? "active" : ""}">${label}</button>
+        `).join("")}
+      </div>
+    </div>
+
+    <div class="monthly-sheet-heading"><span>投稿画像 1</span><strong>月間サマリー</strong></div>
+    <article class="monthly-share-sheet summary-sheet" aria-label="月間サマリー画像のプレビュー">
+      <header class="monthly-share-header">
+        <span><b>CONAN CARD</b> TRACKER</span>
+        <strong>${escapeHtml(year)}<i>.</i>${escapeHtml(numericMonth)}</strong>
+      </header>
+      <div class="monthly-share-title">
+        <span>${escapeHtml(profileName)} / ${escapeHtml(recordTypeLabel(selectedRecordType))}</span>
+        <h2>${escapeHtml(reportMonth)}の対戦記録</h2>
+      </div>
+      <section class="monthly-main-stats">
+        <div class="monthly-event-total"><strong>${report.sessionCount}</strong><span>${sessionUnit}</span></div>
+        <div class="monthly-record-total">
+          <span>MONTHLY RECORD</span>
+          <strong>${report.summary.wins}-${report.summary.losses}-${report.summary.draws}</strong>
+          <small>${report.summary.total}戦</small>
+        </div>
+        <div class="monthly-rate-total"><strong>${formatPercentage(report.summary.winRate)}</strong><span>勝率</span></div>
+      </section>
+      <div class="monthly-pass-line"><span>自分のパス率</span><strong>${formatPercentage(report.passUsage.rate)}</strong><small>${report.passUsage.used} / ${report.passUsage.total}戦</small></div>
+      <section class="monthly-awards">
+        <h3>RESULTS</h3>
+        <div>${monthlyAwardMarkup(report.awards)}</div>
+      </section>
+      <section class="monthly-decks">
+        <h3>USED DECKS</h3>
+        <div class="monthly-deck-list">
+          ${visibleDecks.map((deck, index) => `
+            <div class="monthly-deck-row">
+              <b>${String(index + 1).padStart(2, "0")}</b>
+              <span><strong>${escapeHtml(deck.name)}</strong><small>${deck.sessions}${sessionUnit}・${deck.total}戦</small></span>
+              <span><strong>${deck.wins}-${deck.losses}-${deck.draws}</strong><small>${formatPercentage(deck.winRate)}</small></span>
+            </div>
+          `).join("") || `<p class="monthly-empty">この月の記録はありません</p>`}
+          ${report.decks.length > visibleDecks.length ? `<p class="monthly-more">ほか ${report.decks.length - visibleDecks.length}デッキ</p>` : ""}
+        </div>
+      </section>
+      <footer><span>#コナカノート</span><b>MONTHLY REPORT</b></footer>
+    </article>
+
+    <div class="monthly-sheet-heading"><span>投稿画像 2</span><strong>大会履歴</strong></div>
+    <article class="monthly-share-sheet history-sheet" aria-label="大会履歴画像のプレビュー">
+      <header class="monthly-share-header">
+        <span><b>EVENT</b> ARCHIVE</span>
+        <strong>${escapeHtml(year)}<i>.</i>${escapeHtml(numericMonth)}</strong>
+      </header>
+      <div class="monthly-history-title">
+        <div><span>${escapeHtml(profileName)}</span><h2>${escapeHtml(historyTitle)}</h2></div>
+        <strong>${report.sessionCount}<small>${sessionUnit}</small></strong>
+      </div>
+      <div class="monthly-event-list">
+        ${report.events.map((event) => `
+          <div class="monthly-event-row">
+            <time>${formatDate(event.date)}</time>
+            <span class="monthly-event-copy"><strong>${escapeHtml(event.name)}</strong><small>${escapeHtml(event.deckName)}</small></span>
+            <span class="monthly-event-result ${recordToneClass(event.record)}"><strong>${event.record.wins}-${event.record.losses}-${event.record.draws || 0}</strong>${monthlyOutcomeMarkup(event)}</span>
+          </div>
+        `).join("") || `<p class="monthly-empty">この月の大会記録はありません</p>`}
+      </div>
+      <footer><span>#コナカノート</span><b>${escapeHtml(recordTypeLabel(selectedRecordType))}</b></footer>
+    </article>
+    <p class="monthly-preview-footnote">共有機能はレビュー後に有効化します。現在は表示内容と情報量の確認用です。</p>
   `;
 }
 
@@ -2258,12 +2413,12 @@ function render() {
   updateSuggestions();
   renderSyncStatus();
   const currentDeck = route.name === "deckDetail" ? getDeck(route.deckId) : null;
-  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "matchupDetail", "admin", "recovery", "repair"].includes(route.name);
+  const hasBackButton = Boolean(adminPreview) || ["deckDetail", "session", "playerDetail", "storeDetail", "matchupDetail", "monthlyReport", "admin", "recovery", "repair"].includes(route.name);
   view.classList.toggle("player-index-screen", route.name === "players");
   phoneShell.classList.toggle("admin-preview-mode", Boolean(adminPreview));
   topBar.classList.toggle("root-header", !hasBackButton);
   backButton.style.visibility = hasBackButton ? "visible" : "hidden";
-  fabButton.hidden = Boolean(adminPreview) || ["summary", "players", "playerDetail", "storeDetail", "matchupDetail", "admin", "recovery", "repair"].includes(route.name) || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
+  fabButton.hidden = Boolean(adminPreview) || ["summary", "players", "playerDetail", "storeDetail", "matchupDetail", "monthlyReport", "admin", "recovery", "repair"].includes(route.name) || (route.name === "sessions" && route.view === "stores") || Boolean(currentDeck?.archived);
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.nav === rootNavName()));
 
   if (route.name === "decks") renderDecks();
@@ -2271,6 +2426,7 @@ function render() {
   if (route.name === "session") renderSession(route.sessionId);
   if (route.name === "summary") renderSummary();
   if (route.name === "matchupDetail") renderMatchupDetail();
+  if (route.name === "monthlyReport") renderMonthlyReport();
   if (route.name === "players" || route.name === "playerDetail") renderPlayers();
   if (route.name === "sessions") renderSessions();
   if (route.name === "storeDetail") renderStoreDetail(route.storeName);
@@ -2290,6 +2446,7 @@ function rootNavName() {
   if (route.name === "storeDetail") return "sessions";
   if (route.name === "repair") return "summary";
   if (route.name === "matchupDetail") return "summary";
+  if (route.name === "monthlyReport") return "summary";
   if (route.name === "recovery") return "decks";
   return route.name;
 }
@@ -2745,6 +2902,28 @@ entryForm.addEventListener("submit", (event) => {
 });
 
 view.addEventListener("click", (event) => {
+  const monthlyReportButton = event.target.closest("[data-open-monthly-report]");
+  if (monthlyReportButton) {
+    if (accountContext.role !== "superadmin" || adminPreview) return;
+    setRoute({
+      name: "monthlyReport",
+      month: monthlyReportButton.dataset.openMonthlyReport,
+      recordType: "challenge",
+      returnRoute: { ...route }
+    });
+    return;
+  }
+  const monthlyRecordTypeButton = event.target.closest("[data-monthly-report-record-type]");
+  if (monthlyRecordTypeButton) {
+    if (accountContext.role !== "superadmin" || adminPreview) return;
+    setRoute({
+      ...route,
+      name: "monthlyReport",
+      month: "",
+      recordType: normalizeRecordType(monthlyRecordTypeButton.dataset.monthlyReportRecordType)
+    });
+    return;
+  }
   if (event.target.closest("[data-open-account-recovery]")) {
     setRoute({ name: "recovery" });
     saveAccountRecoveryStatus({
@@ -2921,6 +3100,11 @@ view.addEventListener("click", (event) => {
 });
 
 view.addEventListener("change", (event) => {
+  const monthlyReportMonth = event.target.closest("[data-monthly-report-month]");
+  if (monthlyReportMonth && accountContext.role === "superadmin" && !adminPreview) {
+    setRoute({ ...route, name: "monthlyReport", month: monthlyReportMonth.value });
+    return;
+  }
   const adminMonth = event.target.closest("[data-admin-month]");
   if (adminMonth) setRoute({ ...route, name: "admin", adminMonth: adminMonth.value, adminMatchup: "" });
   const adminEnvironment = event.target.closest("[data-admin-environment]");
@@ -3666,6 +3850,7 @@ backButton.addEventListener("click", () => {
   if (route.name === "playerDetail") setRoute({ name: "players", playerQuery: route.playerQuery || "", playerSort: route.playerSort || "latest", playerDirection: route.playerDirection || "desc", playerMonth: route.playerMonth || "", playerEnvironment: route.playerEnvironment || "", playerRecordType: normalizeRecordType(route.playerRecordType, { allowAll: true }) });
   if (route.name === "storeDetail") setRoute(route.returnRoute || { name: "sessions", view: "stores" });
   if (route.name === "matchupDetail") setRoute(route.returnRoute || analysisRoute());
+  if (route.name === "monthlyReport") setRoute(route.returnRoute || analysisRoute({ month: route.month, recordType: route.recordType }));
   if (route.name === "repair") setRoute({ name: "summary" });
   if (route.name === "recovery") setRoute({ name: "decks" });
   if (route.name === "admin") setRoute({ name: "decks" });
