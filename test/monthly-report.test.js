@@ -51,9 +51,9 @@ const state = {
     }
   ],
   matches: [
-    { id: "m1", sessionId: "aug-early", result: "win", firstPlayer: "first", myPassed: "none" },
-    { id: "m2", sessionId: "aug-early", result: "loss", firstPlayer: "second", myPassed: "pass1" },
-    { id: "m3", sessionId: "aug-late", result: "win", firstPlayer: "second", myPassed: "none" },
+    { id: "m1", sessionId: "aug-early", result: "win", firstPlayer: "first", myPassed: "none", opponentPartnerColor: "blue" },
+    { id: "m2", sessionId: "aug-early", result: "loss", firstPlayer: "second", myPassed: "pass1", opponentPartnerColor: "red" },
+    { id: "m3", sessionId: "aug-late", result: "win", firstPlayer: "second", myPassed: "none", opponentPartnerColor: "blue" },
     { id: "m4", sessionId: "aug-late", result: "win", roundType: "bye", firstPlayer: "", myPassed: "none" },
     { id: "m5", sessionId: "aug-free", result: "win", firstPlayer: "first", myPassed: "none" },
     { id: "m6", sessionId: "july", result: "loss", firstPlayer: "first", myPassed: "none" }
@@ -90,4 +90,21 @@ test("monthly report collects awards, deck records, and newest-first event histo
   assert.deepEqual(report.events.map((event) => event.id), ["aug-late", "aug-early"]);
   assert.equal(report.events[0].record.total, 2);
   assert.equal(report.events[0].record.wins, 2);
+});
+
+test("monthly report groups completed records by opponent color for each deck", () => {
+  const report = buildMonthlyReport(state, { month: "2026-08", recordType: "challenge" });
+  const onimaru = report.decks.find((deck) => deck.id === "deck-a");
+  const hayate = report.decks.find((deck) => deck.id === "deck-b");
+
+  assert.deepEqual(report.opponentColorUsage, { recorded: 3, total: 3 });
+  assert.deepEqual(onimaru.opponentColors.map((color) => [color.id, color.total, color.winRate]), [
+    ["blue", 1, 100],
+    ["green", 0, 0],
+    ["white", 0, 0],
+    ["red", 1, 0],
+    ["yellow", 0, 0],
+    ["black", 0, 0]
+  ]);
+  assert.equal(hayate.opponentColors.find((color) => color.id === "blue").winRate, 100);
 });

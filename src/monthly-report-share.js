@@ -13,6 +13,8 @@ const colors = {
   text: "#f5f1fa",
   muted: "#aaa2b6",
   gold: "#e5b949",
+  silver: "#c9c2d0",
+  bronze: "#9f8a78",
   purple: "#9d7bff",
   blue: "#69b6f7",
   red: "#ff6f8d"
@@ -46,6 +48,14 @@ export function monthlyOutcomeLabel(event = {}) {
   const placement = placementLabels[event.placement] || "";
   const random = event.randomPrizeWon && event.placement !== "champion" ? "ランダム" : "";
   return [placement, random].filter(Boolean).join("・");
+}
+
+export function monthlyOutcomeTone(label = "") {
+  if (label.startsWith("優勝")) return "champion";
+  if (label.startsWith("2位")) return "second";
+  if (label.startsWith("ベスト4")) return "top4";
+  if (label.includes("ランダム")) return "random";
+  return "";
 }
 
 export function buildMonthlyHistoryRows(report = {}) {
@@ -154,10 +164,30 @@ function drawBrandHeader(context, label, monthCode) {
   drawText(context, monthCode, 1026, 124, { size: 32, weight: 900, align: "right" });
 }
 
-function drawStat(context, x, label, value, note = "") {
+function drawStat(context, x, width, label, value, note = "", valueSize = 52) {
   drawText(context, label, x, 310, { size: 21, weight: 800, color: colors.muted });
-  drawText(context, value, x, 382, { size: 58, weight: 900 });
-  if (note) drawText(context, note, x, 420, { size: 21, weight: 800, color: colors.muted });
+  let primarySize = valueSize;
+  let noteSize = 18;
+  let primaryWidth = 0;
+  let noteWidth = 0;
+  do {
+    setFont(context, primarySize, 900);
+    primaryWidth = context.measureText(value).width;
+    setFont(context, noteSize, 800);
+    noteWidth = note ? context.measureText(`・${note}`).width : 0;
+    if (primaryWidth + noteWidth <= width || primarySize <= 34) break;
+    primarySize -= 2;
+    noteSize = Math.max(15, noteSize - 0.5);
+  } while (primarySize > 34);
+
+  drawText(context, value, x, 382, { size: primarySize, weight: 900 });
+  if (note) {
+    drawText(context, `・${note}`, x + primaryWidth + 6, 382, {
+      size: noteSize,
+      weight: 800,
+      color: colors.muted
+    });
+  }
 }
 
 function awardItems(awards = {}) {
@@ -182,6 +212,83 @@ function recordColor(record = {}) {
   if (number(record.wins) > number(record.losses)) return colors.blue;
   if (number(record.wins) < number(record.losses)) return colors.red;
   return colors.gold;
+}
+
+const opponentColorTones = {
+  blue: "#2b83d5",
+  green: "#29966f",
+  white: "#e9e4ee",
+  red: "#df506d",
+  yellow: "#e6ad32",
+  black: "#77717f"
+};
+
+function drawColorMatrix(context, decks, usage, top) {
+  const visibleDecks = decks.slice(0, 4);
+  const title = decks.length > visibleDecks.length ? "対面色別勝率（上位4デッキ）" : "対面色別勝率";
+  drawText(context, title, 54, top, { size: 24, weight: 900 });
+  drawText(context, `色記録済み ${number(usage?.recorded)}/${number(usage?.total)}戦`, 1026, top, {
+    size: 18,
+    weight: 800,
+    color: colors.muted,
+    align: "right"
+  });
+
+  const labelWidth = 250;
+  const gridLeft = 286;
+  const gridWidth = 740;
+  const columnWidth = gridWidth / 6;
+  const headerY = top + 38;
+  const rowStart = top + 54;
+  const rowHeight = 56;
+  const colorRows = visibleDecks[0]?.opponentColors || [];
+
+  colorRows.forEach((color, index) => {
+    const centerX = gridLeft + (columnWidth * index) + (columnWidth / 2);
+    context.fillStyle = opponentColorTones[color.id] || colors.muted;
+    context.beginPath();
+    context.arc(centerX - 18, headerY - 6, 7, 0, Math.PI * 2);
+    context.fill();
+    drawText(context, color.label, centerX - 5, headerY, {
+      size: 16,
+      weight: 900,
+      color: colors.muted,
+      align: "center"
+    });
+  });
+
+  visibleDecks.forEach((deck, rowIndex) => {
+    const y = rowStart + (rowIndex * rowHeight);
+    drawText(context, deck.name, 54, y + 35, { size: 22, weight: 900, maxWidth: labelWidth - 12 });
+    (deck.opponentColors || []).forEach((color, columnIndex) => {
+      const x = gridLeft + (columnWidth * columnIndex) + 5;
+      const width = columnWidth - 10;
+      drawRoundedRect(context, x, y + 2, width, 48, 6, {
+        fill: colors.panel,
+        stroke: color.total ? opponentColorTones[color.id] : colors.line
+      });
+      if (!number(color.total)) {
+        drawText(context, "–", x + (width / 2), y + 33, {
+          size: 20,
+          weight: 800,
+          color: colors.muted,
+          align: "center"
+        });
+        return;
+      }
+      drawText(context, percentage(color.winRate), x + (width / 2), y + 24, {
+        size: 19,
+        weight: 900,
+        align: "center"
+      });
+      drawText(context, `${number(color.total)}戦`, x + (width / 2), y + 43, {
+        size: 14,
+        weight: 800,
+        color: colors.muted,
+        align: "center"
+      });
+    });
+  });
 }
 
 function createCanvas(documentRef, width, height) {
@@ -210,40 +317,47 @@ export function renderMonthlySummaryCanvas(report = {}, {
   drawText(context, recordTypeLabel, 1026, 218, { size: 26, weight: 800, color: colors.muted, align: "right" });
   drawDivider(context, 248);
 
-  drawStat(context, 54, `参加${sessionUnit}`, String(number(report.sessionCount)), `${number(report.summary?.total)}戦`);
-  drawStat(context, 276, "戦績", recordText(report.summary));
-  drawStat(context, 650, "勝率", percentage(report.summary?.winRate));
-  drawStat(context, 865, "パス率", percentage(report.passUsage?.rate), `${number(report.passUsage?.used)} / ${number(report.passUsage?.total)}戦`);
+  drawStat(context, 54, 190, `参加${sessionUnit}`, `${number(report.sessionCount)}${sessionUnit}`, `${number(report.summary?.total)}戦`, 48);
+  drawStat(context, 264, 330, "戦績", recordText(report.summary), "", 56);
+  drawStat(context, 615, 190, "勝率", percentage(report.summary?.winRate), "", 52);
+  drawStat(context, 825, 201, "パス率", percentage(report.passUsage?.rate), `${number(report.passUsage?.used)}/${number(report.passUsage?.total)}戦`, 48);
 
-  drawDivider(context, 460);
-  drawText(context, "大会結果", 54, 518, { size: 24, weight: 900 });
+  drawDivider(context, 430);
+  drawText(context, "大会結果", 54, 476, { size: 24, weight: 900 });
   const awards = awardItems(report.awards);
   if (awards.length) {
     let awardX = 54;
     awards.forEach(([label, count, tone]) => {
-      const width = drawAwardChip(context, awardX, 542, label, count, tone);
+      const width = drawAwardChip(context, awardX, 494, label, count, tone);
       awardX += width + 14;
     });
   } else {
-    drawText(context, "入賞・ランダム賞の記録なし", 54, 581, { size: 24, weight: 700, color: colors.muted });
+    drawText(context, "入賞・ランダム賞の記録なし", 54, 533, { size: 24, weight: 700, color: colors.muted });
   }
 
-  drawText(context, "使用デッキ", 54, 666, { size: 24, weight: 900 });
-  drawText(context, "大会数 / 戦績 / 勝率", 1026, 666, { size: 20, weight: 800, color: colors.muted, align: "right" });
-  drawDivider(context, 688);
+  drawText(context, "使用デッキ", 54, 602, { size: 24, weight: 900 });
+  drawText(context, "大会数", 660, 602, { size: 18, weight: 800, color: colors.muted, align: "right" });
+  drawText(context, "戦績", 850, 602, { size: 18, weight: 800, color: colors.muted, align: "right" });
+  drawText(context, "勝率", 1026, 602, { size: 18, weight: 800, color: colors.muted, align: "right" });
+  drawDivider(context, 620);
   const decks = (report.decks || []).slice(0, 6);
   if (!decks.length) {
-    drawText(context, "この月の対戦記録はありません", 54, 756, { size: 28, color: colors.muted });
+    drawText(context, "この月の対戦記録はありません", 54, 678, { size: 28, color: colors.muted });
   }
   decks.forEach((deck, index) => {
-    const y = 742 + (index * 82);
+    const y = 628 + (index * 52);
     drawText(context, String(index + 1).padStart(2, "0"), 54, y + 32, { size: 20, weight: 900, color: colors.gold });
-    drawText(context, deck.name, 105, y + 32, { size: 29, weight: 900, maxWidth: 430 });
-    drawText(context, `${number(deck.sessions)}${sessionUnit}`, 620, y + 32, { size: 23, weight: 800, color: colors.muted });
-    drawText(context, recordText(deck), 790, y + 32, { size: 27, weight: 900, color: recordColor(deck), align: "right" });
-    drawText(context, percentage(deck.winRate), 1026, y + 32, { size: 27, weight: 900, align: "right" });
-    drawDivider(context, y + 58);
+    drawText(context, deck.name, 105, y + 32, { size: 25, weight: 900, maxWidth: 440 });
+    drawText(context, `${number(deck.sessions)}${sessionUnit}`, 660, y + 32, { size: 21, weight: 800, color: colors.muted, align: "right" });
+    drawText(context, recordText(deck), 850, y + 32, { size: 23, weight: 900, color: recordColor(deck), align: "right" });
+    drawText(context, percentage(deck.winRate), 1026, y + 32, { size: 23, weight: 900, align: "right" });
+    drawDivider(context, y + 48);
   });
+
+  if (decks.length) {
+    const matrixTop = Math.min(960, 840 + (decks.length * 20));
+    drawColorMatrix(context, decks, report.opponentColorUsage, matrixTop);
+  }
 
   drawText(context, "#コナカノート", 54, 1294, { size: 24, weight: 900, color: colors.gold });
   drawText(context, "CONAN CARD TRACKER", 1026, 1294, { size: 20, weight: 800, color: colors.muted, align: "right" });
@@ -252,17 +366,24 @@ export function renderMonthlySummaryCanvas(report = {}, {
 
 function drawOutcomeChip(context, label, x, centerY, maxWidth, fontSize) {
   if (!label) return;
+  const tone = monthlyOutcomeTone(label);
+  const style = {
+    champion: { stroke: colors.gold, text: "#f2cf70", fill: "#2b2417" },
+    second: { stroke: colors.silver, text: "#e0dae6", fill: "#26222c" },
+    top4: { stroke: colors.bronze, text: "#c4b4a7", fill: "#241f24" },
+    random: { stroke: colors.purple, text: "#cbbcff", fill: colors.panelStrong }
+  }[tone] || { stroke: colors.line, text: colors.muted, fill: colors.panelStrong };
   setFont(context, fontSize, 900);
   const width = Math.min(maxWidth, context.measureText(label).width + 28);
   const height = fontSize + 18;
   drawRoundedRect(context, x + maxWidth - width, centerY - (height / 2), width, height, 8, {
-    fill: colors.panelStrong,
-    stroke: label.includes("ランダム") ? colors.purple : colors.gold
+    fill: style.fill,
+    stroke: style.stroke
   });
   drawText(context, ellipsizedText(context, label, width - 20), x + maxWidth - 12, centerY + (fontSize * 0.34), {
     size: fontSize,
     weight: 900,
-    color: label.includes("ランダム") ? "#cbbcff" : "#f1cf78",
+    color: style.text,
     align: "right"
   });
 }

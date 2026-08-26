@@ -6,6 +6,7 @@ import {
   canShareMonthlyReport,
   historyImageLayout,
   monthlyOutcomeLabel,
+  monthlyOutcomeTone,
   monthlyShareText
 } from "../src/monthly-report-share.js";
 
@@ -43,6 +44,11 @@ test("optional tournament outcomes appear immediately before the record", () => 
   assert.equal(monthlyOutcomeLabel(event(0, { placement: "champion" })), "優勝");
   assert.equal(monthlyOutcomeLabel(event(0, { placement: "second", randomPrizeWon: true })), "2位・ランダム");
   assert.equal(monthlyOutcomeLabel(event(0, { randomPrizeWon: true })), "ランダム");
+  assert.equal(monthlyOutcomeTone("優勝"), "champion");
+  assert.equal(monthlyOutcomeTone("2位"), "second");
+  assert.equal(monthlyOutcomeTone("ベスト4"), "top4");
+  assert.equal(monthlyOutcomeTone("ランダム"), "random");
+  assert.equal(monthlyOutcomeTone("2位・ランダム"), "second");
 });
 
 test("history image remains a controlled portrait image even with 30 events", () => {

@@ -3,8 +3,11 @@ import {
   summarizeMatches,
   summarizeRounds
 } from "./analytics.js";
+import { partnerColors } from "./card-catalog.js";
 import { sortSessionsNewestFirst } from "./data-operations.js";
 import { normalizeRecordType } from "./record-types.js";
+
+const partnerColorIds = new Set(partnerColors.map((color) => color.id));
 
 function reportSummary(matches) {
   const summary = summarizeMatches(matches);
@@ -15,6 +18,13 @@ function reportSummary(matches) {
     draws: summary.draws || 0,
     winRate: summary.winRate
   };
+}
+
+function opponentColorRecords(matches) {
+  return partnerColors.map((color) => ({
+    ...color,
+    ...reportSummary(matches.filter((match) => match.opponentPartnerColor === color.id))
+  }));
 }
 
 function sessionsForReport(state, month, recordType) {
@@ -39,11 +49,13 @@ export function buildMonthlyReport(state = {}, { month = "", recordType = "chall
     deckGroups.set(session.deckId, group);
   });
 
+  const summary = reportSummary(matches);
   const decks = [...deckGroups.entries()].map(([deckId, group]) => ({
     id: deckId,
     name: decksById.get(deckId)?.name || "デッキ未設定",
     sessions: group.sessions.length,
-    ...reportSummary(group.matches)
+    ...reportSummary(group.matches),
+    opponentColors: opponentColorRecords(group.matches)
   })).sort((left, right) => (
     right.total - left.total
     || right.sessions - left.sessions
@@ -65,7 +77,11 @@ export function buildMonthlyReport(state = {}, { month = "", recordType = "chall
     month,
     recordType: selectedType,
     sessionCount: sessions.length,
-    summary: reportSummary(matches),
+    summary,
+    opponentColorUsage: {
+      recorded: reportSummary(matches.filter((match) => partnerColorIds.has(match.opponentPartnerColor))).total,
+      total: summary.total
+    },
     passUsage: getMyPassUsage(matches),
     awards: {
       champion: sessions.filter((session) => session.placement === "champion").length,
