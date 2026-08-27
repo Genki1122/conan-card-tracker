@@ -4,14 +4,15 @@ import test from "node:test";
 
 const rootUrl = new URL("../", import.meta.url);
 
-test("monthly report preview is reachable only from the superadmin analysis view", async () => {
+test("monthly report uses the scheduled public access gate", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /accountContext\.role === "superadmin" && !adminPreview/);
+  assert.match(appSource, /canAccessMonthlyReport/);
   assert.match(appSource, /data-open-monthly-report/);
   assert.match(appSource, /function renderMonthlyReport/);
-  assert.match(appSource, /accountContext\.role !== "superadmin"/);
   assert.match(appSource, /if \(route\.name === "monthlyReport"\) renderMonthlyReport\(\)/);
+  assert.doesNotMatch(appSource, /管理者限定プレビュー/);
+  assert.doesNotMatch(appSource, /一般利用者には表示されません/);
 });
 
 test("monthly report preview guides image saving before opening an editable X post", async () => {

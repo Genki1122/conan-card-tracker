@@ -37,14 +37,15 @@ test("the shared sheet renders concise release details", async () => {
   assert.match(appSource, /更新情報を取得できませんでした/);
 });
 
-test("the running release is shown automatically only when it is unseen", async () => {
+test("the latest available release is announced only when it is unseen", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
   assert.match(appSource, /const appVersion = "55"/);
   assert.match(appSource, /async function initializeReleaseNotes/);
-  assert.match(appSource, /unseenRelease\(manifest, readSeenReleaseVersion\(localStorage\), appVersion\)/);
-  assert.match(appSource, /if \(!release \|\| dialog\.open \|\| accountOnboardingActive\) return/);
+  assert.match(appSource, /unseenAvailableRelease\(manifest, readSeenReleaseVersion\(localStorage\)\)/);
+  assert.match(appSource, /if \(dialog\.open \|\| accountOnboardingActive\)/);
   assert.match(appSource, /openDialog\("releaseNotes", release\.version\);\s*markReleaseSeen\(localStorage, release\.version\);/);
+  assert.match(appSource, /scheduleNextReleaseAnnouncement\(manifest\)/);
 });
 
 test("the three-dot menu keeps a route to release history", async () => {
@@ -57,5 +58,7 @@ test("the three-dot menu keeps a route to release history", async () => {
   assert.match(appSource, /mode === "releaseHistory"/);
   assert.match(appSource, /function releaseHistoryMarkup/);
   assert.match(appSource, /更新履歴/);
+  assert.match(appSource, /const currentRelease = latestAvailableRelease\(releaseManifest\)/);
+  assert.match(appSource, /markReleaseSeen\(localStorage, currentRelease\.version\)/);
   assert.match(styles, /\.release-history/);
 });

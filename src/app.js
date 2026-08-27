@@ -129,13 +129,17 @@ import {
   monthlyShareText
 } from "./monthly-report-share.js";
 import {
+  availableReleases,
+  latestAvailableRelease,
   latestRelease,
   markReleaseSeen,
+  nextScheduledRelease,
   normalizeReleaseManifest,
   readSeenReleaseVersion,
   releaseForVersion,
-  unseenRelease
+  unseenAvailableRelease
 } from "./release-notes.js";
+import { canAccessMonthlyReport } from "./feature-releases.js";
 import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
@@ -240,6 +244,7 @@ let caseCardReturnFocus = null;
 let releaseManifest = normalizeReleaseManifest();
 let releaseLoadPromise = null;
 let availableRelease = null;
+let releaseAnnouncementTimer = null;
 let monthlyShareState = { token: 0, files: [], urls: [], text: "" };
 
 const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unknown: "未記録" };
@@ -1373,14 +1378,18 @@ function latestMonthlyReportMonth(recordType = "challenge") {
 }
 
 function monthlyReportEntryMarkup(selectedMonth = "") {
-  if (accountContext.role !== "superadmin" || adminPreview) return "";
+  if (!monthlyReportAccessible()) return "";
   const month = selectedMonth || latestMonthlyReportMonth("challenge");
   return `
     <button class="monthly-report-entry" type="button" data-open-monthly-report="${escapeHtml(month)}">
-      <span><b>ADMIN PREVIEW</b><strong>${formatMonth(month)}のまとめ</strong></span>
-      <span>共有イメージを見る <b aria-hidden="true">›</b></span>
+      <span><b>MONTHLY REPORT</b><strong>${formatMonth(month)}のまとめ</strong></span>
+      <span>画像を作る <b aria-hidden="true">›</b></span>
     </button>
   `;
+}
+
+function monthlyReportAccessible() {
+  return canAccessMonthlyReport({ role: accountContext.role, adminPreview: Boolean(adminPreview) });
 }
 
 function resetMonthlyShareState() {
@@ -1444,15 +1453,15 @@ async function prepareMonthlyReportShare(report, options) {
 }
 
 function openMonthlyShareGuide() {
-  if (accountContext.role !== "superadmin" || adminPreview || !monthlyShareState.files.length) return;
+  if (!monthlyReportAccessible() || !monthlyShareState.files.length) return;
   openDialog("monthlyShareGuide");
 }
 
 function renderMonthlyReport() {
   title.textContent = "月間まとめ";
-  if (accountContext.role !== "superadmin" || adminPreview) {
+  if (!monthlyReportAccessible()) {
     resetMonthlyShareState();
-    view.innerHTML = `<div class="empty-card">この試作画面を表示する権限がありません</div>`;
+    view.innerHTML = `<div class="empty-card">月間まとめは8月30日20:00から利用できます</div>`;
     return;
   }
 
@@ -1475,9 +1484,9 @@ function renderMonthlyReport() {
 
   view.innerHTML = `
     <section class="monthly-preview-intro">
-      <span>管理者限定プレビュー</span>
-      <strong>月間まとめの共有イメージ</strong>
-      <p>実データを使った表示試作です。一般利用者には表示されません。</p>
+      <span>MONTHLY REPORT</span>
+      <strong>${formatMonth(selectedMonth)}の記録を2枚で振り返る</strong>
+      <p>画像を保存してXへ投稿できます。</p>
     </section>
     <div class="monthly-report-controls">
       <label><span>対象月</span><select data-monthly-report-month>
@@ -2940,7 +2949,7 @@ view.addEventListener("click", (event) => {
   }
   const monthlyReportButton = event.target.closest("[data-open-monthly-report]");
   if (monthlyReportButton) {
-    if (accountContext.role !== "superadmin" || adminPreview) return;
+    if (!monthlyReportAccessible()) return;
     setRoute({
       name: "monthlyReport",
       month: monthlyReportButton.dataset.openMonthlyReport,
@@ -2951,7 +2960,7 @@ view.addEventListener("click", (event) => {
   }
   const monthlyRecordTypeButton = event.target.closest("[data-monthly-report-record-type]");
   if (monthlyRecordTypeButton) {
-    if (accountContext.role !== "superadmin" || adminPreview) return;
+    if (!monthlyReportAccessible()) return;
     setRoute({
       ...route,
       name: "monthlyReport",
@@ -3137,7 +3146,7 @@ view.addEventListener("click", (event) => {
 
 view.addEventListener("change", (event) => {
   const monthlyReportMonth = event.target.closest("[data-monthly-report-month]");
-  if (monthlyReportMonth && accountContext.role === "superadmin" && !adminPreview) {
+  if (monthlyReportMonth && monthlyReportAccessible()) {
     setRoute({ ...route, name: "monthlyReport", month: monthlyReportMonth.value });
     return;
   }
@@ -3379,7 +3388,7 @@ dialogFields.addEventListener("click", (event) => {
     if (panel === "releaseHistory") {
       loadReleaseManifest().then(() => {
         openDialog("releaseHistory");
-        const currentRelease = releaseForVersion(releaseManifest, appVersion);
+        const currentRelease = latestAvailableRelease(releaseManifest);
         if (currentRelease) markReleaseSeen(localStorage, currentRelease.version);
       });
       return;
@@ -4511,11 +4520,17 @@ function registerServiceWorker() {
   });
 }
 
-function showUpdateBanner() {
+function showUpdateBanner(releaseOverride = null) {
   if (updateBanner) updateBanner.hidden = false;
   phoneShell?.classList.add("update-available");
+  if (releaseOverride) {
+    availableRelease = releaseOverride;
+    updateBannerTitle.textContent = releaseOverride.title || "新しい更新があります";
+    updateBannerSummary.textContent = releaseOverride.summary || "更新内容を確認して反映できます";
+    return;
+  }
   loadReleaseManifest().then((manifest) => {
-    const release = latestRelease(manifest);
+    const release = latestAvailableRelease(manifest);
     availableRelease = release;
     updateBannerTitle.textContent = release?.title || "新しい更新があります";
     updateBannerSummary.textContent = release?.summary || "更新内容を確認して反映できます";
@@ -4524,8 +4539,9 @@ function showUpdateBanner() {
 
 showUpdateDetailsButton?.addEventListener("click", async () => {
   const manifest = await loadReleaseManifest();
-  availableRelease = latestRelease(manifest);
+  availableRelease = latestAvailableRelease(manifest);
   openDialog("releaseNotes", availableRelease?.version || "");
+  if (availableRelease?.version) markReleaseSeen(localStorage, availableRelease.version);
 });
 
 applyUpdateButton?.addEventListener("click", () => window.location.reload());
@@ -4547,10 +4563,29 @@ async function loadReleaseManifest() {
 
 async function initializeReleaseNotes() {
   const manifest = await loadReleaseManifest();
-  const release = unseenRelease(manifest, readSeenReleaseVersion(localStorage), appVersion);
-  if (!release || dialog.open || accountOnboardingActive) return;
+  scheduleNextReleaseAnnouncement(manifest);
+  const release = unseenAvailableRelease(manifest, readSeenReleaseVersion(localStorage));
+  if (!release) return false;
+  if (dialog.open || accountOnboardingActive) {
+    showUpdateBanner(release);
+    return false;
+  }
   openDialog("releaseNotes", release.version);
   markReleaseSeen(localStorage, release.version);
+  return true;
+}
+
+function scheduleNextReleaseAnnouncement(manifest) {
+  window.clearTimeout(releaseAnnouncementTimer);
+  const nextRelease = nextScheduledRelease(manifest);
+  if (!nextRelease) return;
+  const releaseTime = Date.parse(nextRelease.availableAt);
+  const delay = Math.max(0, releaseTime - Date.now());
+  releaseAnnouncementTimer = window.setTimeout(async () => {
+    releaseAnnouncementTimer = null;
+    if (route.name === "summary") render();
+    await initializeReleaseNotes();
+  }, Math.min(delay + 50, 2_147_483_647));
 }
 
 function releaseDetailsMarkup(release) {
@@ -4567,12 +4602,13 @@ function releaseDetailsMarkup(release) {
 }
 
 function releaseHistoryMarkup(manifest) {
-  if (!manifest.releases.length) {
+  const releases = availableReleases(manifest);
+  if (!releases.length) {
     return `<div class="release-empty" role="status">更新情報を取得できませんでした。</div>`;
   }
   return `
     <div class="release-history">
-      ${manifest.releases.map((release) => `
+      ${releases.map((release) => `
         <article>
           <div class="release-meta"><span>v${escapeHtml(release.version)}</span><time datetime="${escapeHtml(release.releasedAt)}">${escapeHtml(release.releasedAt)}</time></div>
           <h3>${escapeHtml(release.title)}</h3>

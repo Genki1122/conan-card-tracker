@@ -1,0 +1,91 @@
+name: Encrypted Supabase backup
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+      timezone: "Asia/Tokyo"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "supabase-backup"
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+    steps:
+      - name: Validate backup secrets
+        shell: bash
+        run: |
+          test -n "$SUPABASE_DB_URL" || { echo "SUPABASE_DB_URL is not configured"; exit 1; }
+          test -n "$BACKUP_ENCRYPTION_PASSPHRASE" || { echo "BACKUP_ENCRYPTION_PASSPHRASE is not configured"; exit 1; }
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Set backup paths
+        id: backup
+        shell: bash
+        run: |
+          stamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
+          echo "dir=$RUNNER_TEMP/supabase-backup-$stamp" >> "$GITHUB_OUTPUT"
+          echo "archive=$RUNNER_TEMP/supabase-backup-$stamp.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "encrypted=$RUNNER_TEMP/supabase-backup-$stamp.tar.gz.gpg" >> "$GITHUB_OUTPUT"
+
+      - name: Create logical dumps
+        shell: bash
+        run: |
+          mkdir -p "${{ steps.backup.outputs.dir }}"
+          supabase db dump --db-url "$SUPABASE_DB_URL" --file "${{ steps.backup.outputs.dir }}/roles.sql" --role-only
+          supabase db dump --db-url "$SUPABASE_DB_URL" --file "${{ steps.backup.outputs.dir }}/schema.sql"
+          supabase db dump --db-url "$SUPABASE_DB_URL" --file "${{ steps.backup.outputs.dir }}/data.sql" --use-copy --data-only
+          printf '{"createdAt":"%s","source":"conan-card-tracker","scope":"complete-logical-dump"}\n' \
+            "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" > "${{ steps.backup.outputs.dir }}/manifest.json"
+
+      - name: Validate dump contents
+        shell: bash
+        run: |
+          test -s "${{ steps.backup.outputs.dir }}/roles.sql"
+          test -s "${{ steps.backup.outputs.dir }}/schema.sql"
+          test -s "${{ steps.backup.outputs.dir }}/data.sql"
+          grep -q "app_states" "${{ steps.backup.outputs.dir }}/data.sql"
+          grep -q "auth" "${{ steps.backup.outputs.dir }}/data.sql"
+          grep -q "users" "${{ steps.backup.outputs.dir }}/data.sql"
+
+      - name: Encrypt backup
+        shell: bash
+        run: |
+          tar -C "${{ steps.backup.outputs.dir }}" -czf "${{ steps.backup.outputs.archive }}" .
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            --output "${{ steps.backup.outputs.encrypted }}" \
+            "${{ steps.backup.outputs.archive }}"
+
+      - name: Verify encrypted archive
+        shell: bash
+        run: |
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt "${{ steps.backup.outputs.encrypted }}" \
+            | tar -tzf - \
+            | grep -q "./manifest.json"
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ steps.backup.outputs.stamp }}
+          path: ${{ steps.backup.outputs.encrypted }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

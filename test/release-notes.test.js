@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  latestAvailableRelease,
   latestRelease,
   markReleaseSeen,
+  nextScheduledRelease,
   normalizeReleaseManifest,
   readSeenReleaseVersion,
   releaseForVersion,
+  unseenAvailableRelease,
   unseenRelease
 } from "../src/release-notes.js";
 
@@ -63,4 +66,29 @@ test("reads and writes the seen version without throwing on unavailable storage"
   assert.equal(readSeenReleaseVersion(storage), "54");
   assert.equal(readSeenReleaseVersion({ getItem() { throw new Error("blocked"); } }), "");
   assert.equal(markReleaseSeen({ setItem() { throw new Error("blocked"); } }, "54"), false);
+});
+
+test("keeps a scheduled release hidden until its release time", () => {
+  const scheduled = normalizeReleaseManifest({
+    currentVersion: "55",
+    releases: [
+      ...manifest.releases,
+      {
+        version: "56",
+        releasedAt: "2026-08-30",
+        availableAt: "2026-08-30T20:00:00+09:00",
+        title: "月間まとめを追加"
+      }
+    ]
+  });
+  const before = new Date("2026-08-30T19:59:59+09:00");
+  const after = new Date("2026-08-30T20:00:00+09:00");
+
+  assert.equal(scheduled.releases[0].availableAt, "2026-08-30T20:00:00+09:00");
+  assert.equal(latestAvailableRelease(scheduled, before)?.version, "54");
+  assert.equal(latestAvailableRelease(scheduled, after)?.version, "56");
+  assert.equal(nextScheduledRelease(scheduled, before)?.version, "56");
+  assert.equal(nextScheduledRelease(scheduled, after), null);
+  assert.equal(unseenAvailableRelease(scheduled, "54", before), null);
+  assert.equal(unseenAvailableRelease(scheduled, "54", after)?.version, "56");
 });
