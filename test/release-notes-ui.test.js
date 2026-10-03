@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { normalizeReleaseManifest, unseenAvailableRelease } from "../src/release-notes.js";
 
 const rootUrl = new URL("../", import.meta.url);
 
@@ -40,12 +41,31 @@ test("the shared sheet renders concise release details", async () => {
 test("the latest available release is announced only when it is unseen", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /const appVersion = "55"/);
+  assert.match(appSource, /const appVersion = "57"/);
   assert.match(appSource, /async function initializeReleaseNotes/);
   assert.match(appSource, /unseenAvailableRelease\(manifest, readSeenReleaseVersion\(localStorage\)\)/);
   assert.match(appSource, /if \(dialog\.open \|\| accountOnboardingActive\)/);
   assert.match(appSource, /openDialog\("releaseNotes", release\.version\);\s*markReleaseSeen\(localStorage, release\.version\);/);
   assert.match(appSource, /scheduleNextReleaseAnnouncement\(manifest\)/);
+});
+
+test("the public pass picker release is announced and its modules are cached", async () => {
+  const manifest = normalizeReleaseManifest(JSON.parse(await readFile(new URL("releases.json", rootUrl), "utf8")));
+  const release = unseenAvailableRelease(manifest, "56");
+  assert.equal(manifest.currentVersion, "57");
+  assert.equal(release?.version, "57");
+  assert.equal(release?.title, "パスを番号で複数選択できるようになりました");
+  assert.ok(release.items.some(item => item.includes("2&3パス")));
+  assert.ok(release.items.some(item => item.includes("X投稿")));
+  assert.equal(unseenAvailableRelease(manifest, "57"), null);
+  assert.doesNotMatch(JSON.stringify(release), /管理者|プレビュー/);
+  const index = await readFile(new URL("index.html", rootUrl), "utf8");
+  const worker = await readFile(new URL("sw.js", rootUrl), "utf8");
+  assert.match(index, /src="\.\/src\/app\.js\?v=57"/);
+  assert.match(worker, /const CACHE_NAME = "conan-card-tracker-v57"/);
+  assert.ok(worker.includes('"./src/app.js?v=57"'));
+  assert.ok(worker.includes('"./src/pass-selection.js"'));
+  assert.ok(worker.includes('"./src/feature-releases.js"'));
 });
 
 test("the three-dot menu keeps a route to release history", async () => {

@@ -33,13 +33,14 @@ test("new combinations keep the existing X suffix and indentation", () => {
   assert.ok(text.includes("先 × ｜相手デッキ｜2&3パス・被1&2&3パス"));
 });
 
-test("multi-pass input is restricted to signed-in administrators editing their own records", () => {
-  assert.equal(typeof features.canUsePassPicker, "function", "admin-only pass picker gate must exist");
+test("multi-pass input is public while viewing another account stays read-only", () => {
+  assert.equal(typeof features.canUsePassPicker, "function");
   assert.equal(features.canUsePassPicker({ signedIn: true, role: "superadmin" }), true);
-  assert.equal(features.canUsePassPicker({ signedIn: false, role: "superadmin" }), false);
-  assert.equal(features.canUsePassPicker({ signedIn: true, role: "" }), false);
+  assert.equal(features.canUsePassPicker({ signedIn: false, role: "superadmin" }), true);
+  assert.equal(features.canUsePassPicker({ signedIn: true, role: "" }), true);
+  assert.equal(features.canUsePassPicker({ signedIn: false, role: "" }), true);
   assert.equal(features.canUsePassPicker({ signedIn: true, role: "superadmin", adminPreview: true }), false);
-  assert.equal(features.canUsePassPicker(), false);
+  assert.equal(features.canUsePassPicker(), true);
 });
 
 test("every combination is displayed in pass badges", () => {

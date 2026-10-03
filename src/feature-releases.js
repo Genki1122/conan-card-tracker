@@ -1,7 +1,7 @@
 export const MONTHLY_REPORT_RELEASE_AT = "2026-08-30T20:00:00+09:00";
 
-export function canUsePassPicker({ signedIn = false, role = "", adminPreview = false } = {}) {
-  return signedIn && role === "superadmin" && !adminPreview;
+export function canUsePassPicker({ adminPreview = false } = {}) {
+  return !adminPreview;
 }
 
 const monthlyReportReleaseTime = Date.parse(MONTHLY_REPORT_RELEASE_AT);

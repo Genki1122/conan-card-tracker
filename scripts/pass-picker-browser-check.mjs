@@ -27,6 +27,8 @@ window.testApp = {
   view: () => setRoute({name:"session",sessionId:"session"}),
   preview: () => { adminPreview = {username:"Read only",viewedState:state,ownState:state}; render(); },
   passAccess: passPickerAccessible,
+  announce: initializeReleaseNotes,
+  banner: showUpdateBanner,
   share: () => buildSessionShareText({session:state.sessions[0],deck:state.decks[0],matches:state.matches})
 };`;
 const server = createServer(async (request, response) => {
@@ -36,8 +38,7 @@ const server = createServer(async (request, response) => {
     if (!file.href.startsWith(root.href)) { response.writeHead(403).end(); return; }
     const body = path === "/src/app.js" ? app + hooks
       : path === "/src/cloud.js" ? cloudMock
-        : path === "/releases.json" ? '{"currentVersion":"55","releases":[]}'
-          : await readFile(file);
+        : await readFile(file);
     const type = path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css" : path.endsWith(".json") ? "application/json" : "text/html";
     response.writeHead(200, { "Content-Type": type }).end(body);
   } catch { response.writeHead(404).end(); }
@@ -59,9 +60,11 @@ async function run(browser, engine, name, options, check) {
   Object.assign(data.matches[0], options.match || {});
   await context.addInitScript(fixture => {
     window.fixture = fixture;
-    localStorage.setItem("conan-card-tracker-release-seen-v1", "56");
+    if (!localStorage.getItem("conan-card-tracker-release-seen-v1")) {
+      localStorage.setItem("conan-card-tracker-release-seen-v1", fixture.seenVersion);
+    }
     localStorage.setItem(`conan-card-tracker-v2:${fixture.guest ? "anonymous" : "user:preview"}`, JSON.stringify(fixture.data));
-  }, {role:options.role ?? "superadmin",guest:Boolean(options.guest),data});
+  }, {role:options.role ?? "superadmin",guest:Boolean(options.guest),seenVersion:options.seenVersion ?? "57",data});
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -190,15 +193,24 @@ try {
         assert.equal(await page.evaluate(() => testApp.state().matches[0].myPassed), "pass2");
       });
       for (const [name, options] of [["regular account",{role:""}],["guest",{role:"",guest:true}]]) {
-        await run(browser, engine, `${name} keeps dropdowns`, options, async page => {
-          await page.evaluate(() => testApp.open());
-          assert.equal(await page.locator("[data-pass-number]").count(), 0);
-          assert.deepEqual(await page.locator('select[name="myPassed"] option').evaluateAll(options => options.map(option => option.value)), ["none","pass1","pass2","pass3","pass12"]);
+        await run(browser, engine, `${name} can save and reopen multiple passes`, options, async page => {
+          await open(page);
+          assert.equal(await page.locator("[data-pass-number]").count(), 6);
+          assert.equal(await page.locator('select[name="myPassed"]').count(), 0);
+          const self = page.locator("[data-pass-picker]").first();
+          const opponent = page.locator("[data-pass-picker]").nth(1);
+          for (const number of [2,3]) await self.locator(`[value="${number}"][type="checkbox"]`).check();
+          for (const number of [1,3]) await opponent.locator(`[value="${number}"][type="checkbox"]`).check();
+          await save(page);
+          await open(page);
+          assert.equal(await page.locator('input[name="myPassed"]').inputValue(), "pass23");
+          assert.equal(await page.locator('input[name="opponentPassed"]').inputValue(), "pass13");
+          assert.ok((await page.evaluate(() => testApp.share())).includes("｜2&3パス・被1&3パス"));
         });
       }
       await run(browser, engine, "regular account preserves imported preview combination", {role:"",match:{myPassed:"pass23"}}, async page => {
-        await page.evaluate(() => testApp.open());
-        assert.equal(await page.locator('select[name="myPassed"]').inputValue(), "pass23");
+        await open(page);
+        assert.equal(await page.locator('input[name="myPassed"]').inputValue(), "pass23");
         await save(page);
         assert.equal(await page.evaluate(() => testApp.state().matches[0].myPassed), "pass23");
       });
@@ -217,6 +229,29 @@ try {
         await page.evaluate(() => testApp.preview());
         assert.equal(await page.evaluate(() => testApp.passAccess()), false);
         assert.equal(await page.locator("[data-edit-match]").count(), 0);
+      });
+      await run(browser, engine, "regular users see the public release once and can reopen its details", {role:"",seenVersion:"56"}, async page => {
+        await page.waitForFunction(() => document.querySelector("#dialogTitle").textContent === "パスを番号で複数選択できるようになりました");
+        assert.equal(await page.locator("#entryDialog").isVisible(), true);
+        assert.ok((await page.locator(".release-details").innerText()).includes("2&3パス"));
+        assert.ok((await page.locator(".release-details").innerText()).includes("X投稿"));
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), "57");
+        await page.screenshot({path:`/tmp/conan-pass-${engine}-release.png`});
+        await page.locator('button[value="cancel"]').click();
+        assert.equal(await page.evaluate(() => testApp.announce()), false);
+        assert.equal(await page.locator("#entryDialog").isVisible(), false);
+        await page.evaluate(() => testApp.banner());
+        await page.waitForFunction(() => document.querySelector("#updateBannerTitle").textContent === "パスを番号で複数選択できるようになりました");
+        assert.equal(await page.locator("#updateBanner").isVisible(), true);
+        await page.locator("#showUpdateDetailsButton").click();
+        assert.equal(await page.locator("#entryDialog").isVisible(), true);
+        await page.locator('button[value="cancel"]').click();
+        await page.locator("#applyUpdateButton").click();
+        await page.waitForLoadState("load");
+        await page.waitForFunction(() => window.testApp?.ready());
+        assert.equal(await page.evaluate(() => testApp.announce()), false);
+        await open(page);
+        assert.equal(await page.locator("[data-pass-number]").count(), 6);
       });
     } finally { await browser.close(); }
   }

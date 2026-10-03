@@ -7,3 +7,10 @@
 - Share pass labels across history and X output. Count a passed match once regardless of the selected combination.
 - Verify admin/non-admin access, save/reopen, legacy values, pending/bye rounds, all combinations, badges and X output. Check Chromium and WebKit at mobile widths using isolated test records.
 - Deploy only this change from the clean published main baseline. Leave the separate unpublished reliability work intact. Add no general-user release announcement; general rollout awaits review.
+
+## Approved Public Rollout
+
+- Following administrator review, enable the same picker for regular and guest accounts. Other-account previews remain read-only.
+- Publish release 57 with an in-app announcement, matching app/cache versions, and cached picker modules. Keep past release history.
+- Verify regular/guest save and reopen, release details, seen-state persistence, and the update button in Chromium and WebKit before deployment.
+- Provide an X announcement draft; do not post to X automatically.

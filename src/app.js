@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=55";
+} from "./auth-challenge.js?v=57";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -55,7 +55,7 @@ import {
   duplicateAdminUsers,
   endAdminPreview
 } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=55";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=57";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -164,13 +164,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=55";
+} from "./cloud.js?v=57";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "55";
+const appVersion = "57";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -3973,8 +3973,6 @@ caseCardSearch.addEventListener("compositionend", renderCaseCardDialogOptions);
 
 function passPickerAccessible() {
   return canUsePassPicker({
-    signedIn: cloudStatus.signedIn,
-    role: accountContext.role,
     adminPreview: Boolean(adminPreview)
   });
 }
