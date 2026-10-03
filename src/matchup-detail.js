@@ -1,10 +1,4 @@
-const passLabels = {
-  pass1: "1パス",
-  pass2: "2パス",
-  pass3: "3パス",
-  pass12: "1&2パス",
-  true: "パス有"
-};
+import { passLabels } from "./pass-selection.js";
 
 const validResults = new Set(["win", "loss", "draw"]);
 const validTurns = new Set(["first", "second"]);

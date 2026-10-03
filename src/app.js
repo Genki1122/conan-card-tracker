@@ -139,7 +139,8 @@ import {
   releaseForVersion,
   unseenAvailableRelease
 } from "./release-notes.js";
-import { canAccessMonthlyReport } from "./feature-releases.js";
+import { canAccessMonthlyReport, canUsePassPicker } from "./feature-releases.js";
+import { passFieldMarkup, passLabels, updatePassPicker } from "./pass-selection.js";
 import {
   addEnvironmentCatalogItem,
   cloudSnapshot,
@@ -251,15 +252,6 @@ const rpsLabels = { rock: "グー", scissors: "チョキ", paper: "パー", unkn
 const resultLabels = { pending: "未確定", win: "Win", loss: "Lose", draw: "Draw" };
 const resultFilterLabels = { all: "勝敗すべて", win: "勝ち", loss: "負け", draw: "引分" };
 const firstLabels = { first: "先攻", second: "後攻" };
-const passLabels = {
-  none: "無し",
-  pass1: "1パス",
-  pass2: "2パス",
-  pass3: "3パス",
-  pass12: "1&2パス",
-  false: "無し",
-  true: "有"
-};
 const placementLabels = { champion: "優勝", second: "2位", top4: "ベスト4", other: "その他" };
 const prizeMethodLabels = { rps: "じゃんけん", roulette: "ルーレット", other: "その他", unrecorded: "未記録" };
 const analysisPivotOptions = [
@@ -2722,8 +2714,8 @@ function openDialog(mode, targetId = null) {
         <label>デッキ名<input name="opponentDeck" list="opponentDeckSuggestions" placeholder="例: 婚活警視庁" value="${escapeHtml(editingMatch?.opponentDeck === "不明" ? "" : editingMatch?.opponentDeck || "")}"></label>
         <label>じゃんけんで相手の出した手<select name="opponentRps">${optionTags([["unknown", "未記録"], ["rock", "グー"], ["scissors", "チョキ"], ["paper", "パー"]], editingMatch?.opponentRps || "unknown")}</select></label>
         <div class="inline-fields">
-          <label>自分のパス<select name="myPassed">${passOptions(editingMatch?.myPassed || "none")}</select></label>
-          <label>相手のパス<select name="opponentPassed">${passOptions(editingMatch?.opponentPassed || "none")}</select></label>
+          ${passFieldMarkup({ name: "myPassed", label: "自分のパス", value: editingMatch?.myPassed, multiple: passPickerAccessible() })}
+          ${passFieldMarkup({ name: "opponentPassed", label: "相手のパス", value: editingMatch?.opponentPassed, multiple: passPickerAccessible() })}
         </div>
         <label>メモ<textarea name="memo" rows="3" placeholder="印象的だった展開、敗因など">${escapeHtml(editingMatch?.memo || "")}</textarea></label>
       </details>
@@ -3257,6 +3249,8 @@ view.addEventListener("compositionend", (event) => {
 });
 
 dialogFields.addEventListener("change", (event) => {
+  const passNumber = event.target.closest("[data-pass-number]");
+  if (passNumber && passPickerAccessible()) updatePassPicker(passNumber.closest("[data-pass-picker]"));
   if (event.target.closest("select[name='retainedAdminUserId']")) syncAdminAccountDeleteButton();
   const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput) updatePlayerNameSuggestions(playerInput);
@@ -3977,14 +3971,12 @@ caseCardSearch.addEventListener("input", (event) => {
 
 caseCardSearch.addEventListener("compositionend", renderCaseCardDialogOptions);
 
-function passOptions(selected = "none") {
-  return [
-    ["none", "無し"],
-    ["pass1", "1パス"],
-    ["pass2", "2パス"],
-    ["pass3", "3パス"],
-    ["pass12", "1&2パス"]
-  ].map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+function passPickerAccessible() {
+  return canUsePassPicker({
+    signedIn: cloudStatus.signedIn,
+    role: accountContext.role,
+    adminPreview: Boolean(adminPreview)
+  });
 }
 
 function partnerColorChoices(name, selected = "", scope = "") {
