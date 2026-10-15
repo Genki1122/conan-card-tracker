@@ -7,6 +7,8 @@ import { createRequire } from "node:module";
 const { chromium, webkit } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = new URL("../", import.meta.url);
 const app = await readFile(new URL("src/app.js", root), "utf8");
+const releaseManifest = JSON.parse(await readFile(new URL("releases.json", root), "utf8"));
+const currentRelease = releaseManifest.releases.find(release => release.version === releaseManifest.currentVersion);
 const cloud = await readFile(new URL("src/cloud.js", root), "utf8");
 const exports = [...cloud.matchAll(/^export (?:async )?function (\w+)/gm)].map(match => match[1]);
 const mocks = {
@@ -29,6 +31,7 @@ window.testApp = {
   passAccess: passPickerAccessible,
   announce: initializeReleaseNotes,
   banner: showUpdateBanner,
+  history: () => { openDialog("menu"); },
   share: () => buildSessionShareText({session:state.sessions[0],deck:state.decks[0],matches:state.matches})
 };`;
 const server = createServer(async (request, response) => {
@@ -64,7 +67,7 @@ async function run(browser, engine, name, options, check) {
       localStorage.setItem("conan-card-tracker-release-seen-v1", fixture.seenVersion);
     }
     localStorage.setItem(`conan-card-tracker-v2:${fixture.guest ? "anonymous" : "user:preview"}`, JSON.stringify(fixture.data));
-  }, {role:options.role ?? "superadmin",guest:Boolean(options.guest),seenVersion:options.seenVersion ?? "57",data});
+  }, {role:options.role ?? "superadmin",guest:Boolean(options.guest),seenVersion:options.seenVersion ?? currentRelease.version,data});
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -231,22 +234,23 @@ try {
         assert.equal(await page.locator("[data-edit-match]").count(), 0);
       });
       await run(browser, engine, "regular users see the public release once and can reopen its details", {role:"",seenVersion:"56"}, async page => {
-        await page.waitForFunction(() => document.querySelector("#dialogTitle").textContent === "パスを番号で複数選択できるようになりました");
+        await page.waitForFunction(title => document.querySelector("#dialogTitle").textContent === title, currentRelease.title);
         assert.equal(await page.locator("#entryDialog").isVisible(), true);
-        assert.ok((await page.locator(".release-details").innerText()).includes("2&3パス"));
-        assert.ok((await page.locator(".release-details").innerText()).includes("X投稿"));
-        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), "57");
+        assert.ok((await page.locator(".release-details").innerText()).includes(currentRelease.items[0]));
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), currentRelease.version);
         await page.screenshot({path:`/tmp/conan-pass-${engine}-release.png`});
         await page.locator('button[value="cancel"]').click();
         assert.equal(await page.evaluate(() => testApp.announce()), false);
         assert.equal(await page.locator("#entryDialog").isVisible(), false);
         await page.evaluate(() => testApp.banner());
-        await page.waitForFunction(() => document.querySelector("#updateBannerTitle").textContent === "パスを番号で複数選択できるようになりました");
-        assert.equal(await page.locator("#updateBanner").isVisible(), true);
-        await page.locator("#showUpdateDetailsButton").click();
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await page.evaluate(() => testApp.history());
+        await page.locator('[data-open-menu-panel="releaseHistory"]').click();
+        await page.locator(".release-history").waitFor();
         assert.equal(await page.locator("#entryDialog").isVisible(), true);
+        assert.ok((await page.locator(".release-history").innerText()).includes(currentRelease.title));
         await page.locator('button[value="cancel"]').click();
-        await page.locator("#applyUpdateButton").click();
+        await page.reload();
         await page.waitForLoadState("load");
         await page.waitForFunction(() => window.testApp?.ready());
         assert.equal(await page.evaluate(() => testApp.announce()), false);

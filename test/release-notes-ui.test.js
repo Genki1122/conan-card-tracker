@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { normalizeReleaseManifest, unseenAvailableRelease } from "../src/release-notes.js";
+import { normalizeReleaseManifest, releaseForVersion, unseenAvailableRelease } from "../src/release-notes.js";
 
 const rootUrl = new URL("../", import.meta.url);
 
@@ -23,7 +23,8 @@ test("the update banner shows a compact summary with details and update actions"
 test("release metadata enriches the banner without blocking a generic fallback", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /fetch\("\.\/releases\.json", \{ cache: "no-store" \}\)/);
+  assert.match(appSource, /fetch\(url, \{ cache: "no-store" \}\)/);
+  assert.match(appSource, /requestMetadata\("\.\/releases\.json"\)/);
   assert.match(appSource, /function showUpdateBanner/);
   assert.match(appSource, /updateBannerTitle\.textContent = release\?\.title \|\| "新しい更新があります"/);
   assert.match(appSource, /updateBannerSummary\.textContent = release\?\.summary \|\| "更新内容を確認して反映できます"/);
@@ -41,7 +42,7 @@ test("the shared sheet renders concise release details", async () => {
 test("the latest available release is announced only when it is unseen", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /const appVersion = "57"/);
+  assert.match(appSource, /const appVersion = "58"/);
   assert.match(appSource, /async function initializeReleaseNotes/);
   assert.match(appSource, /unseenAvailableRelease\(manifest, readSeenReleaseVersion\(localStorage\)\)/);
   assert.match(appSource, /if \(dialog\.open \|\| accountOnboardingActive\)/);
@@ -49,23 +50,30 @@ test("the latest available release is announced only when it is unseen", async (
   assert.match(appSource, /scheduleNextReleaseAnnouncement\(manifest\)/);
 });
 
-test("the public pass picker release is announced and its modules are cached", async () => {
+test("the pass picker release remains in history and its modules stay cached", async () => {
   const manifest = normalizeReleaseManifest(JSON.parse(await readFile(new URL("releases.json", rootUrl), "utf8")));
-  const release = unseenAvailableRelease(manifest, "56");
-  assert.equal(manifest.currentVersion, "57");
+  const release = releaseForVersion(manifest, "57");
   assert.equal(release?.version, "57");
   assert.equal(release?.title, "パスを番号で複数選択できるようになりました");
   assert.ok(release.items.some(item => item.includes("2&3パス")));
   assert.ok(release.items.some(item => item.includes("X投稿")));
-  assert.equal(unseenAvailableRelease(manifest, "57"), null);
   assert.doesNotMatch(JSON.stringify(release), /管理者|プレビュー/);
   const index = await readFile(new URL("index.html", rootUrl), "utf8");
   const worker = await readFile(new URL("sw.js", rootUrl), "utf8");
-  assert.match(index, /src="\.\/src\/app\.js\?v=57"/);
-  assert.match(worker, /const CACHE_NAME = "conan-card-tracker-v57"/);
-  assert.ok(worker.includes('"./src/app.js?v=57"'));
+  assert.match(index, /src="\.\/src\/app\.js\?v=58"/);
+  assert.match(worker, /const CACHE_NAME = "conan-card-tracker-v58"/);
+  assert.ok(worker.includes('"./src/app.js?v=58"'));
   assert.ok(worker.includes('"./src/pass-selection.js"'));
   assert.ok(worker.includes('"./src/feature-releases.js"'));
+});
+
+test("the update-banner fix has a current release announcement", async () => {
+  const manifest = normalizeReleaseManifest(JSON.parse(await readFile(new URL("releases.json", rootUrl), "utf8")));
+  assert.equal(manifest.currentVersion, "58");
+  const release = unseenAvailableRelease(manifest, "57");
+  assert.equal(release?.version, "58");
+  assert.equal(release?.title, "更新案内が残る不具合を修正");
+  assert.equal(unseenAvailableRelease(manifest, "58"), null);
 });
 
 test("the three-dot menu keeps a route to release history", async () => {

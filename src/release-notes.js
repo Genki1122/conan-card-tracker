@@ -45,7 +45,15 @@ export function unseenRelease(manifest = {}, seenVersion = "", runningVersion = 
 
 export function unseenAvailableRelease(manifest = {}, seenVersion = "", now = new Date()) {
   const release = latestAvailableRelease(manifest, now);
-  return release && release.version !== cleanText(seenVersion) ? release : null;
+  const seen = cleanText(seenVersion);
+  return release && (!seen || release.version.localeCompare(seen, undefined, { numeric: true }) > 0) ? release : null;
+}
+
+export function isAppUpdateAvailable(manifest = {}, runningVersion = "") {
+  const current = cleanText(manifest.currentVersion);
+  const running = cleanText(runningVersion);
+  return /^\d+$/.test(current) && /^\d+$/.test(running)
+    && current.localeCompare(running, undefined, { numeric: true }) > 0;
 }
 
 export function readSeenReleaseVersion(storage) {

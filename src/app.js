@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=57";
+} from "./auth-challenge.js?v=58";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -55,7 +55,7 @@ import {
   duplicateAdminUsers,
   endAdminPreview
 } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=57";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=58";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -130,13 +130,12 @@ import {
 } from "./monthly-report-share.js";
 import {
   availableReleases,
+  isAppUpdateAvailable,
   latestAvailableRelease,
-  latestRelease,
   markReleaseSeen,
   nextScheduledRelease,
   normalizeReleaseManifest,
   readSeenReleaseVersion,
-  releaseForVersion,
   unseenAvailableRelease
 } from "./release-notes.js";
 import { canAccessMonthlyReport, canUsePassPicker } from "./feature-releases.js";
@@ -164,13 +163,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=57";
+} from "./cloud.js?v=58";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "57";
+const appVersion = "58";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -2547,7 +2546,8 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "releaseNotes") {
-    const release = releaseForVersion(releaseManifest, targetId) || availableRelease || latestRelease(releaseManifest);
+    const release = availableReleases(releaseManifest).find((entry) => entry.version === targetId)
+      || latestAvailableRelease(releaseManifest);
     dialogKicker.textContent = "Update";
     dialogTitle.textContent = release?.title || "更新内容";
     dialogSubmit.hidden = true;
@@ -3384,6 +3384,7 @@ dialogFields.addEventListener("click", (event) => {
         openDialog("releaseHistory");
         const currentRelease = latestAvailableRelease(releaseManifest);
         if (currentRelease) markReleaseSeen(localStorage, currentRelease.version);
+        renderUpdateBanner();
       });
       return;
     }
@@ -4510,35 +4511,56 @@ function registerServiceWorker() {
   });
 }
 
-function showUpdateBanner(releaseOverride = null) {
-  if (updateBanner) updateBanner.hidden = false;
-  phoneShell?.classList.add("update-available");
-  if (releaseOverride) {
-    availableRelease = releaseOverride;
-    updateBannerTitle.textContent = releaseOverride.title || "新しい更新があります";
-    updateBannerSummary.textContent = releaseOverride.summary || "更新内容を確認して反映できます";
-    return;
-  }
-  loadReleaseManifest().then((manifest) => {
-    const release = latestAvailableRelease(manifest);
-    availableRelease = release;
-    updateBannerTitle.textContent = release?.title || "新しい更新があります";
-    updateBannerSummary.textContent = release?.summary || "更新内容を確認して反映できます";
-  });
+async function showUpdateBanner() {
+  await loadReleaseManifest({ refresh: true });
+  renderUpdateBanner();
+}
+
+function renderUpdateBanner() {
+  const needsUpdate = isAppUpdateAvailable(releaseManifest, appVersion);
+  const release = needsUpdate
+    ? availableReleases(releaseManifest).find((entry) => entry.version === releaseManifest.currentVersion)
+    : unseenAvailableRelease(releaseManifest, readSeenReleaseVersion(localStorage));
+  const visible = needsUpdate || Boolean(release);
+  availableRelease = release;
+  if (updateBanner) updateBanner.hidden = !visible;
+  phoneShell?.classList.toggle("update-available", visible);
+  if (applyUpdateButton) applyUpdateButton.hidden = !needsUpdate;
+  if (!visible) return;
+  updateBannerTitle.textContent = release?.title || "新しい更新があります";
+  updateBannerSummary.textContent = release?.summary || "更新内容を確認して反映できます";
 }
 
 showUpdateDetailsButton?.addEventListener("click", async () => {
-  const manifest = await loadReleaseManifest();
+  const manifest = await loadReleaseManifest({ refresh: true });
   availableRelease = latestAvailableRelease(manifest);
   openDialog("releaseNotes", availableRelease?.version || "");
   if (availableRelease?.version) markReleaseSeen(localStorage, availableRelease.version);
+  renderUpdateBanner();
 });
 
-applyUpdateButton?.addEventListener("click", () => window.location.reload());
+applyUpdateButton?.addEventListener("click", async () => {
+  if (applyUpdateButton.disabled) return;
+  applyUpdateButton.disabled = true;
+  applyUpdateButton.textContent = "確認中";
+  try {
+    const manifest = await loadReleaseManifest({ refresh: true, throwOnError: true });
+    if (isAppUpdateAvailable(manifest, appVersion)) {
+      window.location.reload();
+    } else {
+      renderUpdateBanner();
+    }
+  } catch {
+    updateBannerSummary.textContent = "更新情報を取得できませんでした。通信状態を確認して再試行してください";
+  } finally {
+    applyUpdateButton.disabled = false;
+    applyUpdateButton.textContent = "更新";
+  }
+});
 
-async function loadReleaseManifest() {
-  if (releaseLoadPromise) return releaseLoadPromise;
-  releaseLoadPromise = fetch("./releases.json", { cache: "no-store" })
+async function loadReleaseManifest({ refresh = false, throwOnError = false } = {}) {
+  if (!refresh && releaseManifest.currentVersion && !releaseLoadPromise) return releaseManifest;
+  const requestMetadata = (url) => fetch(url, { cache: "no-store" })
     .then((response) => {
       if (!response.ok) throw new Error(`Release metadata request failed: ${response.status}`);
       return response.json();
@@ -4546,22 +4568,41 @@ async function loadReleaseManifest() {
     .then((payload) => {
       releaseManifest = normalizeReleaseManifest(payload);
       return releaseManifest;
-    })
-    .catch(() => releaseManifest);
-  return releaseLoadPromise;
+    });
+  // An explicit update requires a network response, not an offline cached manifest.
+  // A unique URL also prevents a legacy worker from falling back to its cache.
+  if (throwOnError) {
+    return requestMetadata(`./releases.json?update-check=${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  }
+  // Coalesce lifecycle events, but do not keep a resolved request forever.
+  releaseLoadPromise ||= requestMetadata("./releases.json")
+    .finally(() => { releaseLoadPromise = null; });
+  try {
+    return await releaseLoadPromise;
+  } catch {
+    return releaseManifest;
+  }
 }
 
 async function initializeReleaseNotes() {
   const manifest = await loadReleaseManifest();
   scheduleNextReleaseAnnouncement(manifest);
+  if (isAppUpdateAvailable(manifest, appVersion)) {
+    renderUpdateBanner();
+    return false;
+  }
   const release = unseenAvailableRelease(manifest, readSeenReleaseVersion(localStorage));
-  if (!release) return false;
+  if (!release) {
+    renderUpdateBanner();
+    return false;
+  }
   if (dialog.open || accountOnboardingActive) {
-    showUpdateBanner(release);
+    renderUpdateBanner();
     return false;
   }
   openDialog("releaseNotes", release.version);
   markReleaseSeen(localStorage, release.version);
+  renderUpdateBanner();
   return true;
 }
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as releaseNotes from "../src/release-notes.js";
 
 import {
   latestAvailableRelease,
@@ -91,4 +92,22 @@ test("keeps a scheduled release hidden until its release time", () => {
   assert.equal(nextScheduledRelease(scheduled, after), null);
   assert.equal(unseenAvailableRelease(scheduled, "54", before), null);
   assert.equal(unseenAvailableRelease(scheduled, "54", after)?.version, "56");
+});
+
+test("update availability compares deployed code with running code, not announcement versions", () => {
+  assert.equal(typeof releaseNotes.isAppUpdateAvailable, "function");
+  const check = releaseNotes.isAppUpdateAvailable;
+  assert.equal(check({ currentVersion: "58" }, "57"), true);
+  assert.equal(check({ currentVersion: "58" }, "58"), false);
+  assert.equal(check({ currentVersion: "57" }, "58"), false);
+  assert.equal(check({ currentVersion: "100" }, "99"), true);
+  assert.equal(check({ currentVersion: "55", releases: [{ version: "56" }] }, "55"), false);
+  for (const version of ["", "invalid", "NaN"]) {
+    assert.equal(check({ currentVersion: version }, "58"), false);
+    assert.equal(check({ currentVersion: "58" }, version), false);
+  }
+});
+
+test("older cached announcements are not shown again after reading a newer release", () => {
+  assert.equal(unseenAvailableRelease(manifest, "55"), null);
 });

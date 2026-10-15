@@ -1,4 +1,4 @@
-const CACHE_NAME = "conan-card-tracker-v57";
+const CACHE_NAME = "conan-card-tracker-v58";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,15 +8,15 @@ const ASSETS = [
   "./privacy.html",
   "./legal.css",
   "./styles.css",
-  "./src/app.js?v=57",
+  "./src/app.js?v=58",
   "./src/analytics.js",
   "./src/sync-state.js",
   "./src/onboarding.js",
   "./src/initial-state.js",
   "./src/admin-analytics.js",
   "./src/admin-view.js",
-  "./src/auth-feedback.js?v=57",
-  "./src/auth-challenge.js?v=57",
+  "./src/auth-feedback.js?v=58",
+  "./src/auth-challenge.js?v=58",
   "./src/account-storage.js",
   "./src/account-recovery.js",
   "./src/data-quality.js",
@@ -33,7 +33,7 @@ const ASSETS = [
   "./src/feature-releases.js",
   "./src/release-notes.js",
   "./releases.json",
-  "./src/cloud.js?v=57",
+  "./src/cloud.js?v=58",
   "./src/supabase-config.js?v=2",
   "./manifest.webmanifest",
   "./icon-192.png",
@@ -59,6 +59,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  const releaseUrl = new URL("./releases.json", self.location.href);
+  if (url.origin === releaseUrl.origin && url.pathname === releaseUrl.pathname && url.searchParams.has("update-check")) {
+    event.respondWith(fetch(event.request, { cache: "no-store" })
+      .catch(() => new Response("", { status: 503 })));
+    return;
+  }
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request, { cache: "no-store" }).then((response) => {
