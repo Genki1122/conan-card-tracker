@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=58";
+} from "./auth-challenge.js?v=59";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -55,7 +55,7 @@ import {
   duplicateAdminUsers,
   endAdminPreview
 } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=58";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=59";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -131,12 +131,12 @@ import {
 import {
   availableReleases,
   isAppUpdateAvailable,
-  latestAvailableRelease,
-  markReleaseSeen,
+  isReleaseRead,
+  loadReleaseReadState,
+  markReleaseRead,
   nextScheduledRelease,
   normalizeReleaseManifest,
-  readSeenReleaseVersion,
-  unseenAvailableRelease
+  unreadBannerRelease
 } from "./release-notes.js";
 import { canAccessMonthlyReport, canUsePassPicker } from "./feature-releases.js";
 import { passFieldMarkup, passLabels, updatePassPicker } from "./pass-selection.js";
@@ -163,13 +163,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=58";
+} from "./cloud.js?v=59";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "58";
+const appVersion = "59";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -244,6 +244,10 @@ let caseCardReturnFocus = null;
 let releaseManifest = normalizeReleaseManifest();
 let releaseLoadPromise = null;
 let availableRelease = null;
+let releaseReadState = loadReleaseReadState(localStorage);
+let viewedReleaseVersion = "";
+let applyingUpdate = false;
+let updateMessage = "";
 let releaseAnnouncementTimer = null;
 let monthlyShareState = { token: 0, files: [], urls: [], text: "" };
 
@@ -2481,6 +2485,7 @@ function analysisRoute(overrides = {}) {
 }
 
 function openDialog(mode, targetId = null) {
+  finishReleaseReading();
   updateSuggestions();
   dialogMode = mode;
   managedAdminUserId = mode === "adminAccount" ? String(targetId || "") : managedAdminUserId;
@@ -2518,6 +2523,7 @@ function openDialog(mode, targetId = null) {
     dialogTitle.textContent = "メニュー";
     dialogSubmit.hidden = true;
     dialogFields.innerHTML = `
+      <div data-release-update-slot>${releaseUpdateMarkup()}</div>
       <div class="short-menu">${menuRowsMarkup()}</div>
       <div class="menu-note"><strong>自動保存</strong><span>入力内容はこの端末に保存されます。</span></div>
     `;
@@ -2546,20 +2552,21 @@ function openDialog(mode, targetId = null) {
   }
 
   if (mode === "releaseNotes") {
-    const release = availableReleases(releaseManifest).find((entry) => entry.version === targetId)
-      || latestAvailableRelease(releaseManifest);
-    dialogKicker.textContent = "Update";
-    dialogTitle.textContent = release?.title || "更新内容";
+    const release = availableReleases(releaseManifest).find((entry) => entry.version === targetId);
+    dialogKicker.textContent = "Notice";
+    dialogTitle.textContent = release?.title || "お知らせ";
     dialogSubmit.hidden = true;
-    dialogFields.innerHTML = releaseDetailsMarkup(release);
+    dialogFields.innerHTML = `<button class="sheet-back-button" type="button" data-open-menu-panel="releaseHistory">‹ お知らせ一覧</button>${releaseDetailsMarkup(release)}`;
+    viewedReleaseVersion = release?.version || "";
   }
 
   if (mode === "releaseHistory") {
-    dialogKicker.textContent = "Update";
-    dialogTitle.textContent = "更新履歴";
+    dialogKicker.textContent = "Notice";
+    dialogTitle.textContent = "お知らせ";
     dialogSubmit.hidden = true;
     dialogFields.innerHTML = `
       <button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>
+      <div data-release-update-slot>${releaseUpdateMarkup()}</div>
       ${releaseHistoryMarkup(releaseManifest)}
     `;
   }
@@ -3375,15 +3382,26 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  const releaseButton = event.target.closest("[data-open-release]");
+  if (releaseButton) {
+    openDialog("releaseNotes", releaseButton.dataset.openRelease);
+    return;
+  }
+  if (event.target.closest("[data-apply-update]")) {
+    applyAppUpdate();
+    return;
+  }
   const menuPanelButton = event.target.closest("[data-open-menu-panel]");
   if (menuPanelButton) {
     const panel = menuPanelButton.dataset.openMenuPanel;
     if (panel === "dataSettings") dataSettingsMessage = "";
     if (panel === "releaseHistory") {
-      loadReleaseManifest().then(() => {
-        openDialog("releaseHistory");
-        const currentRelease = latestAvailableRelease(releaseManifest);
-        if (currentRelease) markReleaseSeen(localStorage, currentRelease.version);
+      openDialog("releaseHistory");
+      loadReleaseManifest({ refresh: true }).then(() => {
+        if (dialog.open && dialogMode === "releaseHistory") {
+          const list = dialogFields.querySelector(".release-history");
+          if (list) list.outerHTML = releaseHistoryMarkup(releaseManifest);
+        }
         renderUpdateBanner();
       });
       return;
@@ -3943,6 +3961,7 @@ refreshCloudSession();
 initializeReleaseNotes();
 
 dialog.addEventListener("close", () => {
+  if (!dialog.open) finishReleaseReading();
   closeCaseCardDialog();
   accountOnboardingActive = false;
   if (dialogMode === "adminAccount") managedAdminUserId = "";
@@ -4518,31 +4537,47 @@ async function showUpdateBanner() {
 
 function renderUpdateBanner() {
   const needsUpdate = isAppUpdateAvailable(releaseManifest, appVersion);
-  const release = needsUpdate
-    ? availableReleases(releaseManifest).find((entry) => entry.version === releaseManifest.currentVersion)
-    : unseenAvailableRelease(releaseManifest, readSeenReleaseVersion(localStorage));
-  const visible = needsUpdate || Boolean(release);
+  const release = unreadBannerRelease(releaseManifest, releaseReadState);
+  const visible = Boolean(release);
   availableRelease = release;
   if (updateBanner) updateBanner.hidden = !visible;
   phoneShell?.classList.toggle("update-available", visible);
   if (applyUpdateButton) applyUpdateButton.hidden = !needsUpdate;
+  const updateSlot = dialogFields.querySelector("[data-release-update-slot]");
+  if (updateSlot) updateSlot.innerHTML = releaseUpdateMarkup();
+  const unreadCount = dialogFields.querySelector("[data-notice-unread-count]");
+  if (unreadCount) unreadCount.textContent = noticeMenuSummary();
+  syncUpdateControls();
   if (!visible) return;
-  updateBannerTitle.textContent = release?.title || "新しい更新があります";
-  updateBannerSummary.textContent = release?.summary || "更新内容を確認して反映できます";
+  updateBannerTitle.textContent = release?.title || "新しいお知らせがあります";
+  updateBannerSummary.textContent = updateMessage || release?.summary || "内容を確認できます";
 }
 
-showUpdateDetailsButton?.addEventListener("click", async () => {
-  const manifest = await loadReleaseManifest({ refresh: true });
-  availableRelease = latestAvailableRelease(manifest);
-  openDialog("releaseNotes", availableRelease?.version || "");
-  if (availableRelease?.version) markReleaseSeen(localStorage, availableRelease.version);
+function finishReleaseReading() {
+  if (!viewedReleaseVersion) return;
+  releaseReadState = markReleaseRead(localStorage, releaseReadState, viewedReleaseVersion);
+  viewedReleaseVersion = "";
   renderUpdateBanner();
+}
+
+showUpdateDetailsButton?.addEventListener("click", () => {
+  if (availableRelease) openDialog("releaseNotes", availableRelease.version);
 });
 
-applyUpdateButton?.addEventListener("click", async () => {
-  if (applyUpdateButton.disabled) return;
-  applyUpdateButton.disabled = true;
-  applyUpdateButton.textContent = "確認中";
+applyUpdateButton?.addEventListener("click", applyAppUpdate);
+
+function syncUpdateControls() {
+  document.querySelectorAll("#applyUpdateButton, [data-apply-update]").forEach((button) => {
+    button.disabled = applyingUpdate;
+    button.textContent = applyingUpdate ? "確認中" : "更新";
+  });
+}
+
+async function applyAppUpdate() {
+  if (applyingUpdate) return;
+  applyingUpdate = true;
+  updateMessage = "";
+  renderUpdateBanner();
   try {
     const manifest = await loadReleaseManifest({ refresh: true, throwOnError: true });
     if (isAppUpdateAvailable(manifest, appVersion)) {
@@ -4551,12 +4586,25 @@ applyUpdateButton?.addEventListener("click", async () => {
       renderUpdateBanner();
     }
   } catch {
-    updateBannerSummary.textContent = "更新情報を取得できませんでした。通信状態を確認して再試行してください";
+    updateMessage = "更新情報を取得できませんでした。通信状態を確認して再試行してください";
   } finally {
-    applyUpdateButton.disabled = false;
-    applyUpdateButton.textContent = "更新";
+    applyingUpdate = false;
+    renderUpdateBanner();
   }
-});
+}
+
+function releaseUpdateMarkup() {
+  if (!isAppUpdateAvailable(releaseManifest, appVersion)) return "";
+  return `<section class="release-update" aria-label="アプリの更新">
+    <div><strong>更新できます</strong><p data-update-status role="status">${escapeHtml(updateMessage || "最新版を反映できます")}</p></div>
+    <button class="primary-button" type="button" data-apply-update ${applyingUpdate ? "disabled" : ""}>${applyingUpdate ? "確認中" : "更新"}</button>
+  </section>`;
+}
+
+function noticeMenuSummary() {
+  const unread = availableReleases(releaseManifest).filter((release) => !isReleaseRead(releaseReadState, release.version)).length;
+  return unread ? `未読 ${unread}件` : "過去のお知らせを確認";
+}
 
 async function loadReleaseManifest({ refresh = false, throwOnError = false } = {}) {
   if (!refresh && releaseManifest.currentVersion && !releaseLoadPromise) return releaseManifest;
@@ -4587,23 +4635,8 @@ async function loadReleaseManifest({ refresh = false, throwOnError = false } = {
 async function initializeReleaseNotes() {
   const manifest = await loadReleaseManifest();
   scheduleNextReleaseAnnouncement(manifest);
-  if (isAppUpdateAvailable(manifest, appVersion)) {
-    renderUpdateBanner();
-    return false;
-  }
-  const release = unseenAvailableRelease(manifest, readSeenReleaseVersion(localStorage));
-  if (!release) {
-    renderUpdateBanner();
-    return false;
-  }
-  if (dialog.open || accountOnboardingActive) {
-    renderUpdateBanner();
-    return false;
-  }
-  openDialog("releaseNotes", release.version);
-  markReleaseSeen(localStorage, release.version);
   renderUpdateBanner();
-  return true;
+  return Boolean(availableRelease);
 }
 
 function scheduleNextReleaseAnnouncement(manifest) {
@@ -4621,7 +4654,7 @@ function scheduleNextReleaseAnnouncement(manifest) {
 
 function releaseDetailsMarkup(release) {
   if (!release) {
-    return `<div class="release-empty" role="status">更新情報を取得できませんでした。更新はそのまま実行できます。</div>`;
+    return `<div class="release-empty" role="status">お知らせを取得できませんでした。一覧に戻って再試行してください。</div>`;
   }
   return `
     <section class="release-details">
@@ -4635,17 +4668,16 @@ function releaseDetailsMarkup(release) {
 function releaseHistoryMarkup(manifest) {
   const releases = availableReleases(manifest);
   if (!releases.length) {
-    return `<div class="release-empty" role="status">更新情報を取得できませんでした。</div>`;
+    const message = manifest.currentVersion ? "お知らせがありません。" : "お知らせを取得できませんでした。時間をおいて再試行してください。";
+    return `<div class="release-history"><p class="release-empty" role="status">${message}</p></div>`;
   }
   return `
     <div class="release-history">
       ${releases.map((release) => `
-        <article>
-          <div class="release-meta"><span>v${escapeHtml(release.version)}</span><time datetime="${escapeHtml(release.releasedAt)}">${escapeHtml(release.releasedAt)}</time></div>
-          <h3>${escapeHtml(release.title)}</h3>
-          ${release.summary ? `<p>${escapeHtml(release.summary)}</p>` : ""}
-          <ul>${release.items.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        </article>
+        <button type="button" class="release-row" data-open-release="${escapeHtml(release.version)}">
+          <span class="release-row-meta"><time datetime="${escapeHtml(release.releasedAt)}">${escapeHtml(release.releasedAt)}</time>${isReleaseRead(releaseReadState, release.version) ? "" : '<span class="release-unread" data-release-unread>未読</span>'}</span>
+          <strong>${escapeHtml(release.title)}</strong><span class="release-row-chevron" aria-hidden="true">›</span>
+        </button>
       `).join("")}
     </div>
   `;
@@ -4804,7 +4836,7 @@ function menuRowsMarkup() {
     ${pageRow}
     ${adminRow}
     <button type="button" data-open-guide><span>使い方</span><small>初回設定・大会中の記録・データ保護</small><b>›</b></button>
-    <button type="button" data-open-menu-panel="releaseHistory"><span>更新履歴</span><small>機能追加・改善内容を確認</small><b>›</b></button>
+    <button type="button" data-open-menu-panel="releaseHistory"><span>お知らせ</span><small data-notice-unread-count>${escapeHtml(noticeMenuSummary())}</small><b>›</b></button>
     <button type="button" data-open-menu-panel="cloudSettings"><span>クラウド同期</span><small>${escapeHtml(cloudText)}</small><b>›</b></button>
     <button type="button" data-open-menu-panel="dataSettings"><span>環境・データ管理</span><small>環境、名称、バックアップ</small><b>›</b></button>
   `;

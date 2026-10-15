@@ -111,3 +111,64 @@ test("update availability compares deployed code with running code, not announce
 test("older cached announcements are not shown again after reading a newer release", () => {
   assert.equal(unseenAvailableRelease(manifest, "55"), null);
 });
+
+function memoryStorage() {
+  const values = new Map();
+  return { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value) };
+}
+
+test("individual notice reads preserve other unread notices across reloads", () => {
+  assert.equal(typeof releaseNotes.loadReleaseReadState, "function");
+  const storage = memoryStorage();
+  const empty = releaseNotes.loadReleaseReadState(storage);
+  assert.equal(releaseNotes.isReleaseRead(empty, "53"), false);
+  const read = releaseNotes.markReleaseRead(storage, empty, "54");
+  assert.equal(releaseNotes.isReleaseRead(read, "54"), true);
+  assert.equal(releaseNotes.isReleaseRead(read, "53"), false);
+  assert.equal(releaseNotes.isReleaseRead(releaseNotes.loadReleaseReadState(storage), "54"), true);
+  assert.equal(releaseNotes.unreadBannerRelease(manifest, read), null);
+  const stale = normalizeReleaseManifest({currentVersion:"53",releases:[manifest.releases[1]]});
+  assert.equal(releaseNotes.unreadBannerRelease(stale, read), null);
+  const both = releaseNotes.markReleaseRead(storage, read, "53");
+  assert.equal(releaseNotes.isReleaseRead(both, "54"), true);
+  assert.equal(releaseNotes.isReleaseRead(both, "53"), true);
+});
+
+test("legacy seen versions migrate without resurrecting old announcements", () => {
+  assert.equal(typeof releaseNotes.loadReleaseReadState, "function");
+  const storage = memoryStorage();
+  markReleaseSeen(storage, "53");
+  const migrated = releaseNotes.loadReleaseReadState(storage);
+  assert.equal(releaseNotes.isReleaseRead(migrated, "52"), true);
+  assert.equal(releaseNotes.isReleaseRead(migrated, "53"), true);
+  assert.equal(releaseNotes.isReleaseRead(migrated, "54"), false);
+  assert.equal(releaseNotes.unreadBannerRelease(manifest, migrated)?.version, "54");
+  releaseNotes.markReleaseRead(storage, migrated, "55");
+  const reloaded = releaseNotes.loadReleaseReadState(storage);
+  assert.equal(releaseNotes.isReleaseRead(reloaded, "53"), true);
+  assert.equal(releaseNotes.isReleaseRead(reloaded, "54"), false);
+  assert.equal(releaseNotes.isReleaseRead(reloaded, "55"), true);
+  assert.equal(readSeenReleaseVersion(storage), "53");
+});
+
+test("scheduled notices remain unread and hidden until available", () => {
+  assert.equal(typeof releaseNotes.unreadBannerRelease, "function");
+  const scheduled = normalizeReleaseManifest({ currentVersion:"55", releases:[...manifest.releases,
+    {version:"55",title:"Future",releasedAt:"2026-10-15",availableAt:"2026-10-15T20:00:00+09:00"}
+  ] });
+  const storage = memoryStorage();
+  markReleaseSeen(storage, "54");
+  const read = releaseNotes.loadReleaseReadState(storage);
+  assert.equal(releaseNotes.unreadBannerRelease(scheduled, read, "2026-10-15T19:59:59+09:00"), null);
+  assert.equal(releaseNotes.unreadBannerRelease(scheduled, read, "2026-10-15T20:00:00+09:00")?.version, "55");
+});
+
+test("invalid or unavailable notice storage is safe and keeps in-memory reads", () => {
+  assert.equal(typeof releaseNotes.loadReleaseReadState, "function");
+  const blocked = {getItem:() => {throw new Error("blocked");},setItem:() => {throw new Error("blocked");}};
+  const state = releaseNotes.markReleaseRead(blocked, releaseNotes.loadReleaseReadState(blocked), "54");
+  assert.equal(releaseNotes.isReleaseRead(state, "54"), true);
+  const storage = memoryStorage();
+  storage.setItem(releaseNotes.releaseReadStorageKey, "not json");
+  assert.equal(releaseNotes.isReleaseRead(releaseNotes.loadReleaseReadState(storage), "54"), false);
+});

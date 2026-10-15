@@ -26,8 +26,8 @@ test("release metadata enriches the banner without blocking a generic fallback",
   assert.match(appSource, /fetch\(url, \{ cache: "no-store" \}\)/);
   assert.match(appSource, /requestMetadata\("\.\/releases\.json"\)/);
   assert.match(appSource, /function showUpdateBanner/);
-  assert.match(appSource, /updateBannerTitle\.textContent = release\?\.title \|\| "新しい更新があります"/);
-  assert.match(appSource, /updateBannerSummary\.textContent = release\?\.summary \|\| "更新内容を確認して反映できます"/);
+  assert.match(appSource, /updateBannerTitle\.textContent = release\?\.title \|\| "新しいお知らせがあります"/);
+  assert.match(appSource, /updateBannerSummary\.textContent = updateMessage \|\| release\?\.summary/);
 });
 
 test("the shared sheet renders concise release details", async () => {
@@ -36,17 +36,17 @@ test("the shared sheet renders concise release details", async () => {
   assert.match(appSource, /mode === "releaseNotes"/);
   assert.match(appSource, /function releaseDetailsMarkup/);
   assert.match(appSource, /release\.items\.slice\(0, 4\)/);
-  assert.match(appSource, /更新情報を取得できませんでした/);
+  assert.match(appSource, /お知らせを取得できませんでした/);
 });
 
-test("the latest available release is announced only when it is unseen", async () => {
+test("startup uses the latest unread banner without opening a detail", async () => {
   const appSource = await readFile(new URL("src/app.js", rootUrl), "utf8");
 
-  assert.match(appSource, /const appVersion = "58"/);
+  assert.match(appSource, /const appVersion = "59"/);
   assert.match(appSource, /async function initializeReleaseNotes/);
-  assert.match(appSource, /unseenAvailableRelease\(manifest, readSeenReleaseVersion\(localStorage\)\)/);
-  assert.match(appSource, /if \(dialog\.open \|\| accountOnboardingActive\)/);
-  assert.match(appSource, /openDialog\("releaseNotes", release\.version\);\s*markReleaseSeen\(localStorage, release\.version\);/);
+  assert.match(appSource, /unreadBannerRelease\(releaseManifest, releaseReadState\)/);
+  const initializer = appSource.split("async function initializeReleaseNotes()")[1].split("function scheduleNextReleaseAnnouncement")[0];
+  assert.doesNotMatch(initializer, /openDialog|markReleaseRead/);
   assert.match(appSource, /scheduleNextReleaseAnnouncement\(manifest\)/);
 });
 
@@ -60,23 +60,24 @@ test("the pass picker release remains in history and its modules stay cached", a
   assert.doesNotMatch(JSON.stringify(release), /管理者|プレビュー/);
   const index = await readFile(new URL("index.html", rootUrl), "utf8");
   const worker = await readFile(new URL("sw.js", rootUrl), "utf8");
-  assert.match(index, /src="\.\/src\/app\.js\?v=58"/);
-  assert.match(worker, /const CACHE_NAME = "conan-card-tracker-v58"/);
-  assert.ok(worker.includes('"./src/app.js?v=58"'));
+  assert.match(index, /src="\.\/src\/app\.js\?v=59"/);
+  assert.match(worker, /const CACHE_NAME = "conan-card-tracker-v59"/);
+  assert.ok(worker.includes('"./src/app.js?v=59"'));
   assert.ok(worker.includes('"./src/pass-selection.js"'));
   assert.ok(worker.includes('"./src/feature-releases.js"'));
 });
 
-test("the update-banner fix has a current release announcement", async () => {
+test("the notice center has a current release announcement and preserves the prior fix", async () => {
   const manifest = normalizeReleaseManifest(JSON.parse(await readFile(new URL("releases.json", rootUrl), "utf8")));
-  assert.equal(manifest.currentVersion, "58");
-  const release = unseenAvailableRelease(manifest, "57");
-  assert.equal(release?.version, "58");
-  assert.equal(release?.title, "更新案内が残る不具合を修正");
-  assert.equal(unseenAvailableRelease(manifest, "58"), null);
+  assert.equal(manifest.currentVersion, "59");
+  const release = unseenAvailableRelease(manifest, "58");
+  assert.equal(release?.version, "59");
+  assert.match(release?.title, /お知らせ/);
+  assert.equal(unseenAvailableRelease(manifest, "59"), null);
+  assert.equal(releaseForVersion(manifest, "58")?.title, "更新案内が残る不具合を修正");
 });
 
-test("the three-dot menu keeps a route to release history", async () => {
+test("the menu exposes notices without marking the list read", async () => {
   const [appSource, styles] = await Promise.all([
     readFile(new URL("src/app.js", rootUrl), "utf8"),
     readFile(new URL("styles.css", rootUrl), "utf8")
@@ -85,8 +86,11 @@ test("the three-dot menu keeps a route to release history", async () => {
   assert.match(appSource, /data-open-menu-panel="releaseHistory"/);
   assert.match(appSource, /mode === "releaseHistory"/);
   assert.match(appSource, /function releaseHistoryMarkup/);
-  assert.match(appSource, /更新履歴/);
-  assert.match(appSource, /const currentRelease = latestAvailableRelease\(releaseManifest\)/);
-  assert.match(appSource, /markReleaseSeen\(localStorage, currentRelease\.version\)/);
+  assert.match(appSource, /<span>お知らせ<\/span>/);
+  assert.match(appSource, /data-open-release=/);
+  assert.match(appSource, /data-release-unread/);
+  assert.match(appSource, /function finishReleaseReading/);
+  assert.match(appSource, /data-apply-update/);
+  assert.doesNotMatch(appSource, /markReleaseSeen\(/);
   assert.match(styles, /\.release-history/);
 });

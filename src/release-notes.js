@@ -1,4 +1,48 @@
 export const releaseSeenStorageKey = "conan-card-tracker-release-seen-v1";
+export const releaseReadStorageKey = "conan-card-tracker-release-read-v2";
+
+export function loadReleaseReadState(storage) {
+  try {
+    const saved = JSON.parse(storage?.getItem(releaseReadStorageKey) || "null");
+    if (saved && Array.isArray(saved.versions)) {
+      return { legacyThrough: cleanText(saved.legacyThrough), versions: saved.versions.map(cleanText).filter(Boolean) };
+    }
+  } catch {
+    // Fall back to the legacy read baseline without touching any record data.
+  }
+  return { legacyThrough: readSeenReleaseVersion(storage), versions: [] };
+}
+
+export function isReleaseRead(state = {}, version = "") {
+  const target = cleanText(version);
+  if (!target) return false;
+  return Boolean(state.versions?.includes(target) || (state.legacyThrough
+    && target.localeCompare(state.legacyThrough, undefined, { numeric: true }) <= 0));
+}
+
+export function markReleaseRead(storage, state, version) {
+  const target = cleanText(version);
+  if (!target) return state;
+  const saved = loadReleaseReadState(storage);
+  const next = {
+    legacyThrough: state.legacyThrough || saved.legacyThrough,
+    versions: [...new Set([...saved.versions, ...state.versions, target])]
+  };
+  try {
+    storage?.setItem(releaseReadStorageKey, JSON.stringify(next));
+  } catch {
+    // Keep the read state in memory when browser storage is unavailable.
+  }
+  return next;
+}
+
+export function unreadBannerRelease(manifest, readState, now = new Date()) {
+  const latest = latestAvailableRelease(manifest, now);
+  if (!latest || isReleaseRead(readState, latest.version)) return null;
+  // Stale metadata must not promote an older unread notice back into the banner.
+  const newerRead = readState.versions.some((version) => version.localeCompare(latest.version, undefined, { numeric: true }) > 0);
+  return newerRead ? null : latest;
+}
 
 export function normalizeReleaseManifest(payload = {}) {
   const releases = Array.isArray(payload?.releases)

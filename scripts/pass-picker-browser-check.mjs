@@ -233,13 +233,16 @@ try {
         assert.equal(await page.evaluate(() => testApp.passAccess()), false);
         assert.equal(await page.locator("[data-edit-match]").count(), 0);
       });
-      await run(browser, engine, "regular users see the public release once and can reopen its details", {role:"",seenVersion:"56"}, async page => {
-        await page.waitForFunction(title => document.querySelector("#dialogTitle").textContent === title, currentRelease.title);
+      await run(browser, engine, "regular users read a notice once and can reopen it from the list", {role:"",seenVersion:"56"}, async page => {
+        await page.waitForFunction(() => !document.querySelector("#updateBanner").hidden);
+        assert.equal(await page.locator("#entryDialog").isVisible(), false);
+        await page.locator("#showUpdateDetailsButton").click();
         assert.equal(await page.locator("#entryDialog").isVisible(), true);
         assert.ok((await page.locator(".release-details").innerText()).includes(currentRelease.items[0]));
-        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), currentRelease.version);
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), "56");
         await page.screenshot({path:`/tmp/conan-pass-${engine}-release.png`});
         await page.locator('button[value="cancel"]').click();
+        await page.waitForFunction(() => document.querySelector("#updateBanner").hidden);
         assert.equal(await page.evaluate(() => testApp.announce()), false);
         assert.equal(await page.locator("#entryDialog").isVisible(), false);
         await page.evaluate(() => testApp.banner());

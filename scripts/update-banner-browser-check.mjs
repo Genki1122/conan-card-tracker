@@ -10,11 +10,14 @@ const { chromium, webkit } = createRequire(import.meta.url)(process.env.PLAYWRIG
 const root = new URL("../", import.meta.url);
 const source = await readFile(new URL("src/app.js", root), "utf8");
 const version = source.match(/const appVersion = "(\d+)"/)[1];
+const publishedNotices = JSON.parse(await readFile(new URL("releases.json", root), "utf8"));
+const currentNotice = publishedNotices.releases.find(entry => entry.version === version);
 const futureVersion = String(Number(version) + 1);
-const oldCommit = "724e2a75d08f5914b5fd34184e08ba42975f8e17";
+const oldCommit = "7159b18cbef144ca90a321bb24887d9ad3fbe198";
 const oldFiles = Object.fromEntries(["src/app.js", "index.html", "sw.js"].map(path => [path,
   execFileSync("git", ["show", `${oldCommit}:${path}`], {cwd:fileURLToPath(root),encoding:"utf8"})
 ]));
+const oldVersion = oldFiles["src/app.js"].match(/const appVersion = "(\d+)"/)[1];
 const cloud = await readFile(new URL("src/cloud.js", root), "utf8");
 const mocks = {
   isCloudConfigured: "() => false",
@@ -27,14 +30,16 @@ const cloudMock = [...cloud.matchAll(/^export (?:async )?function (\w+)/gm)]
 const hooks = `
 window.updateTest = {
   version: appVersion, banner: showUpdateBanner, announce: initializeReleaseNotes,
-  menu: () => openDialog("menu")
+  menu: () => openDialog("menu"), detail: value => openDialog("releaseNotes", value)
 };`;
-const release = value => ({version:value,releasedAt:"2026-10-15",title:`更新テスト v${value}`,summary:"更新表示の確認",items:["記録は保持されます"]});
+const release = value => value === version ? currentNotice
+  : {version:value,releasedAt:"2026-10-15",title:`更新テスト v${value}`,summary:"更新表示の確認",items:["記録は保持されます"]};
 let deployment = "current";
 let advertisedVersion = version;
 let failMetadata = false;
 let dropMetadata = false;
 let scheduledAt = "";
+let extraReleases = [];
 let metadataRequests = 0;
 const server = createServer(async (request, response) => {
   try {
@@ -49,7 +54,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, {"Content-Type":"application/json","Cache-Control":"no-store"})
         .end(JSON.stringify({currentVersion:advertisedVersion,releases:[
           {...release(advertisedVersion),availableAt:scheduledAt},
-          ...(scheduledAt ? [release(version)] : [])
+          ...(scheduledAt ? [release(version)] : []), ...extraReleases
         ]}));
       return;
     }
@@ -69,13 +74,14 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 let passed = 0;
 
-async function run(browser, engine, name, check, {realWorker=false,old=false}={}) {
+async function run(browser, engine, name, check, {realWorker=false,old=false,unread=false,width=390}={}) {
   deployment = old ? "old" : "current";
-  advertisedVersion = old ? "57" : version;
+  advertisedVersion = old ? oldVersion : version;
   failMetadata = false;
   dropMetadata = false;
   scheduledAt = "";
-  const context = await browser.newContext({viewport:{width:390,height:844},serviceWorkers:realWorker ? "allow" : "block"});
+  extraReleases = [];
+  const context = await browser.newContext({viewport:{width,height:844},serviceWorkers:realWorker ? "allow" : "block"});
   await context.route("**/*", route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await context.addInitScript(({seen,realWorker}) => {
     if (!localStorage.getItem("conan-card-tracker-release-seen-v1")) localStorage.setItem("conan-card-tracker-release-seen-v1", seen);
@@ -98,7 +104,7 @@ async function run(browser, engine, name, check, {realWorker=false,old=false}={}
       };
       Object.defineProperty(navigator, "serviceWorker", {value:worker,configurable:true});
     }
-  }, {seen:advertisedVersion,realWorker});
+  }, {seen:unread ? String(Number(advertisedVersion)-1) : advertisedVersion,realWorker});
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -129,10 +135,25 @@ async function run(browser, engine, name, check, {realWorker=false,old=false}={}
 }
 
 async function refresh(page) { await page.evaluate(() => updateTest.banner()); }
-async function closeDialog(page) { await page.locator('button[value="cancel"]').click(); }
-async function apply(page, targetVersion) {
+async function closeDialog(page) {
+  await page.locator('button[value="cancel"]').click();
+  await page.waitForFunction(() => !document.querySelector("#entryDialog").open);
+}
+async function openMenu(page) { await page.locator("#moreButton").click(); }
+async function openNotices(page) {
+  await openMenu(page);
+  await page.locator('[data-open-menu-panel="releaseHistory"]').click();
+  await page.locator(".release-history").waitFor();
+}
+async function readBanner(page) {
+  await page.locator("#showUpdateDetailsButton").click();
+  await page.locator(".release-details").waitFor();
+  await closeDialog(page);
+  await page.waitForFunction(() => document.querySelector("#updateBanner").hidden);
+}
+async function apply(page, targetVersion, selector="#applyUpdateButton") {
   const navigation = page.waitForNavigation();
-  await page.locator("#applyUpdateButton").click();
+  await page.locator(selector).click();
   await navigation;
   await page.waitForFunction(value => window.updateTest?.version === value, targetVersion);
 }
@@ -150,31 +171,38 @@ try {
           await page.waitForFunction(() => window.updateTest);
         }
       });
-      await run(browser, engine, "reading a deferred announcement hides it without an update button", async page => {
-        await page.evaluate(value => localStorage.setItem("conan-card-tracker-release-seen-v1", value), String(Number(version)-1));
-        await page.evaluate(() => { updateTest.menu(); });
-        await page.evaluate(() => updateTest.announce());
+      await run(browser, engine, "startup shows a banner but never automatically opens the detail", async page => {
+        await refresh(page);
+        assert.equal(await page.locator("#entryDialog").isVisible(), false);
         assert.equal(await page.locator("#updateBanner").isVisible(), true);
         assert.equal(await page.locator("#applyUpdateButton").isVisible(), false);
-        await closeDialog(page);
         await page.locator("#showUpdateDetailsButton").click();
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-read-v2")), null);
         await closeDialog(page);
-        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await page.waitForFunction(() => document.querySelector("#updateBanner").hidden);
+        await page.reload();
+        await page.waitForFunction(() => window.updateTest);
         await refresh(page);
         assert.equal(await page.locator("#updateBanner").isVisible(), false);
-      });
-      await run(browser, engine, "metadata refresh finds a new deployment and reading notes does not apply it", async page => {
+      }, {unread:true});
+      await run(browser, engine, "reading a notice hides the banner but leaves updates in the menu", async page => {
         await refresh(page);
         const requestsBefore = metadataRequests;
         advertisedVersion = futureVersion;
         await refresh(page);
         assert.ok(metadataRequests > requestsBefore);
         assert.equal(await page.locator("#applyUpdateButton").isVisible(), true);
-        await page.locator("#showUpdateDetailsButton").click();
-        await closeDialog(page);
-        assert.equal(await page.locator("#updateBanner").isVisible(), true);
+        await readBanner(page);
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await page.reload();
+        await page.waitForFunction(() => window.updateTest);
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await openMenu(page);
+        assert.equal(await page.locator("[data-apply-update]").isVisible(), true);
         deployment = "future";
-        await apply(page, futureVersion);
+        await apply(page, futureVersion, "[data-apply-update]");
         await refresh(page);
         assert.equal(await page.locator("#updateBanner").isVisible(), false);
       });
@@ -190,8 +218,27 @@ try {
         deployment = "future";
         await apply(page, futureVersion);
         await refresh(page);
+        await readBanner(page);
         assert.equal(await page.locator("#updateBanner").isVisible(), false);
       });
+      await run(browser, engine, "menu update failures stay in the menu without reviving a read banner", async page => {
+        advertisedVersion = futureVersion;
+        await refresh(page);
+        await readBanner(page);
+        await openNotices(page);
+        failMetadata = true;
+        await page.locator("[data-apply-update]").click();
+        await page.waitForFunction(() => document.querySelector("[data-update-status]").textContent.includes("再試行"));
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        assert.equal(await page.locator("[data-apply-update]").isEnabled(), true);
+        assert.equal(await page.evaluate(() => updateTest.version), version);
+        await page.screenshot({path:`/tmp/notice-center-${engine}-update-retry.png`});
+        failMetadata = false;
+        deployment = "future";
+        await apply(page, futureVersion, "[data-apply-update]");
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+      }, {width:320});
       await run(browser, engine, "older metadata cannot announce a downgrade", async page => {
         advertisedVersion = String(Number(version)-1);
         await refresh(page);
@@ -201,13 +248,26 @@ try {
         advertisedVersion = futureVersion;
         scheduledAt = "2099-01-01T00:00:00Z";
         await refresh(page);
-        assert.equal(await page.locator("#applyUpdateButton").isVisible(), true);
-        assert.doesNotMatch(await page.locator("#updateBannerTitle").textContent(), new RegExp(`v${futureVersion}`));
-        await page.locator("#showUpdateDetailsButton").click();
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await openNotices(page);
+        assert.equal(await page.locator("[data-apply-update]").isVisible(), true);
         assert.doesNotMatch(await page.locator("#entryDialog").textContent(), new RegExp(`v${futureVersion}`));
         assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), version);
         await closeDialog(page);
-        assert.equal(await page.locator("#applyUpdateButton").isVisible(), true);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+      });
+      await run(browser, engine, "scheduled notices become a banner at release time without a popup", async page => {
+        advertisedVersion = futureVersion;
+        scheduledAt = "2030-01-01T00:01:00Z";
+        await page.clock.install({time:new Date("2030-01-01T00:00:00Z")});
+        await page.reload();
+        await page.waitForFunction(() => window.updateTest);
+        await page.evaluate(() => updateTest.announce());
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await page.clock.fastForward(61000);
+        await page.waitForFunction(() => !document.querySelector("#updateBanner").hidden);
+        assert.equal(await page.locator("#entryDialog").isVisible(), false);
+        await readBanner(page);
       });
       await run(browser, engine, "an offline worker cache is not treated as a successful update check", async page => {
         await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
@@ -227,27 +287,66 @@ try {
         deployment = "future";
         await apply(page, futureVersion);
         await refresh(page);
+        await readBanner(page);
         assert.equal(await page.locator("#updateBanner").isVisible(), false);
       }, {realWorker:true});
-      await run(browser, engine, "real service worker upgrades published v57 and preserves records", async page => {
-        assert.notEqual(version, "57", "The fix must have a new deployment version");
+      await run(browser, engine, "real service worker upgrades the previous release and preserves records", async page => {
+        assert.notEqual(version, oldVersion, "The feature must have a new deployment version");
         await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
         await page.reload();
-        await page.waitForFunction(() => window.updateTest?.version === "57" && Boolean(navigator.serviceWorker.controller));
+        await page.waitForFunction(value => window.updateTest?.version === value && Boolean(navigator.serviceWorker.controller), oldVersion);
         deployment = "current";
         advertisedVersion = version;
         await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
         await page.waitForFunction(() => !document.querySelector("#updateBanner").hidden);
         await apply(page, version);
         await refresh(page);
-        assert.equal(await page.locator("#updateBanner").isVisible(), false);
-        if (await page.locator("#entryDialog").isVisible()) await closeDialog(page);
+        assert.equal(await page.locator("#entryDialog").isVisible(), false);
+        await readBanner(page);
         await page.reload();
         await page.waitForFunction(value => window.updateTest?.version === value, version);
         await refresh(page);
         assert.equal(await page.locator("#updateBanner").isVisible(), false);
         await page.screenshot({path:`/tmp/update-banner-${engine}-upgraded.png`});
       }, {realWorker:true,old:true});
+      for (const width of [320,390,1024]) {
+        await run(browser, engine, `notice list marks only opened details read and fits ${width}px`, async page => {
+          extraReleases = [release(String(Number(version)-1)), release(String(Number(version)-2))];
+          await page.evaluate(() => {
+            localStorage.removeItem("conan-card-tracker-release-read-v2");
+            localStorage.setItem("conan-card-tracker-release-seen-v1", "1");
+          });
+          await page.reload();
+          await page.waitForFunction(() => window.updateTest);
+          await openNotices(page);
+          assert.equal(await page.locator("#dialogTitle").textContent(), "お知らせ");
+          assert.equal(await page.locator("[data-release-unread]").count(), 3);
+          assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-read-v2")), null);
+          await page.locator(`[data-open-release="${version}"]`).click();
+          assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-read-v2")), null);
+          await page.locator('[data-open-menu-panel="releaseHistory"]').click();
+          await page.locator(".release-history").waitFor();
+          assert.equal(await page.locator("[data-release-unread]").count(), 2);
+          assert.equal(await page.locator("#updateBanner").isVisible(), false);
+          await page.locator(`[data-open-release="${Number(version)-2}"]`).click();
+          await page.keyboard.press("Escape");
+          await page.waitForFunction(() => !document.querySelector("#entryDialog").open);
+          await openNotices(page);
+          assert.equal(await page.locator("[data-release-unread]").count(), 1);
+          const overflow = await page.locator("#entryDialog").evaluate(node => node.scrollWidth > node.clientWidth + 1);
+          assert.equal(overflow, false);
+          await page.screenshot({path:`/tmp/notice-center-${engine}-${width}.png`});
+          await closeDialog(page);
+          await refresh(page);
+          assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        }, {width});
+      }
+      await run(browser, engine, "missing details do not mark a notice read", async page => {
+        await page.evaluate(() => updateTest.detail("missing"));
+        await page.locator(".release-empty").waitFor({timeout:3000});
+        await closeDialog(page);
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-read-v2")), null);
+      });
     } finally { await browser.close(); }
   }
   console.log(`${passed} update scenarios passed`);
