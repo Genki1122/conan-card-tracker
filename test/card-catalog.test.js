@@ -2,11 +2,49 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  caseCards,
+  caseCardColorLabel,
   caseCardsForPartnerColor,
   findCaseCardByName,
+  getCaseCard,
   isCaseCardAvailableForPartnerColor,
   partnerColors
 } from "../src/card-catalog.js";
+
+// Official CT-P11 list, checked 2026-10-29. Parallel prints share the same card ID.
+const showTimeCases = [
+  { number: "B11094", id: "dry-martini", name: "ドライマティーニ", colors: ["black"], label: "黒" },
+  { number: "B11098", id: "conan-vs-kaito-kid", name: "コナンVS怪盗キッド", colors: ["blue", "white"], label: "青/白" },
+  { number: "B11099", id: "who-are-you", name: "あんた何者や", colors: ["green", "red"], label: "緑/赤" },
+  { number: "B11100", id: "mpd-public-security-undercover", name: "警視庁公安部の潜入捜査官", colors: ["yellow", "black"], label: "黄/黒" }
+];
+
+for (const expected of showTimeCases) {
+  test(`registers CT-P11 ${expected.number} once with the official name and colors`, () => {
+    const card = getCaseCard(expected.id);
+    assert.ok(card, expected.name);
+    assert.equal(card.name, expected.name);
+    assert.deepEqual(card.colors, expected.colors);
+    assert.equal(findCaseCardByName(expected.name), card);
+    assert.equal(caseCards.filter(item => item.name === expected.name).length, 1);
+    assert.equal(caseCardColorLabel(card), expected.label);
+    for (const { id: color } of partnerColors) {
+      const available = expected.colors.includes(color);
+      assert.equal(isCaseCardAvailableForPartnerColor(card.id, color), available, color);
+      assert.equal(caseCardsForPartnerColor(color).filter(item => item.id === card.id).length, available ? 1 : 0, color);
+    }
+  });
+}
+
+test("keeps catalog IDs unique and ranks new case cards by usage", () => {
+  assert.equal(new Set(caseCards.map(card => card.id)).size, caseCards.length);
+  const cards = caseCardsForPartnerColor("black", new Map([
+    ["dry-martini", 1], ["mpd-public-security-undercover", 5], ["black-impact", 3]
+  ]));
+  assert.deepEqual(cards.slice(0, 3).map(card => card.id), [
+    "mpd-public-security-undercover", "black-impact", "dry-martini"
+  ]);
+});
 
 test("provides the six Conan Card Game partner colors", () => {
   assert.deepEqual(

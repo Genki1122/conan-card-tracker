@@ -41,7 +41,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=59";
+} from "./auth-challenge.js?v=60";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -55,7 +55,7 @@ import {
   duplicateAdminUsers,
   endAdminPreview
 } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=59";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=60";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -163,13 +163,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=59";
+} from "./cloud.js?v=60";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "59";
+const appVersion = "60";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey

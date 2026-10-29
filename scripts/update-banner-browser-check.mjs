@@ -33,7 +33,7 @@ window.updateTest = {
   menu: () => openDialog("menu"), detail: value => openDialog("releaseNotes", value)
 };`;
 const release = value => value === version ? currentNotice
-  : {version:value,releasedAt:"2026-10-15",title:`更新テスト v${value}`,summary:"更新表示の確認",items:["記録は保持されます"]};
+  : {version:value,releasedAt:currentNotice.releasedAt,title:`更新テスト v${value}`,summary:"更新表示の確認",items:["記録は保持されます"]};
 let deployment = "current";
 let advertisedVersion = version;
 let failMetadata = false;
