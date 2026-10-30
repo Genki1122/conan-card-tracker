@@ -34,9 +34,10 @@ export function sameRows(expected, actual) {
   return left.every((hash, index) => hash === right[index]);
 }
 
-export function localPsqlArgs(target = container) {
+export function localPsqlArgs(target = container, role = "postgres") {
   if (target !== container) throw new Error("Only the isolated restore container is allowed");
-  return ["exec", "-i", container, "psql", "--no-psqlrc", "--quiet", "--tuples-only", "--no-align", "--username", "postgres", "--dbname", "postgres", "--set", "ON_ERROR_STOP=1", "--set", "VERBOSITY=sqlstate", "--file", "-"];
+  if (!["postgres", "supabase_admin"].includes(role)) throw new Error("Only approved local database roles are allowed");
+  return ["exec", "-i", container, "psql", "--no-psqlrc", "--quiet", "--tuples-only", "--no-align", "--username", role, "--dbname", "postgres", "--set", "ON_ERROR_STOP=1", "--set", "VERBOSITY=sqlstate", "--file", "-"];
 }
 
 export function configureDatabase(config, schema, data = "") {
@@ -54,7 +55,9 @@ function docker(args, input) {
   // PostgreSQL errors may contain user records. Never forward stdout/stderr on failure.
   if (result.status !== 0) {
     const code = result.stderr?.match(/ERROR:\s+([0-9A-Z]{5})(?:\s|$)/)?.[1];
-    throw new Error(`Isolated database command failed${code ? ` (SQLSTATE ${code})` : ""}`);
+    const phase = [...(result.stdout?.matchAll(/^RESTORE_PHASE_(ROLES|SCHEMA|DATA)$/gm) ?? [])].at(-1)?.[1];
+    const line = result.stderr?.match(/psql:<stdin>:(\d+):/)?.[1];
+    throw new Error(`Isolated database command failed${code ? ` (SQLSTATE ${code})` : ""}${phase ? ` in ${phase}` : ""}${line ? ` at input line ${line}` : ""}`);
   }
   return result.stdout;
 }
@@ -64,9 +67,9 @@ function assertIsolated() {
   if (Object.keys(JSON.parse(output)).length !== 0) throw new Error("Restore database must have no network connections");
 }
 
-function psql(sql, transaction = false) {
+function psql(sql, transaction = false, role = "postgres") {
   assertIsolated();
-  const args = localPsqlArgs();
+  const args = localPsqlArgs(container, role);
   if (transaction) args.push("--single-transaction");
   return docker(args, sql);
 }
@@ -85,7 +88,7 @@ async function verify(dumpDirectory) {
     if (!tables.find(table => table.table === required)?.rows.length) throw new Error("Required account or record table is missing or empty");
   }
   await report("Restoring saved roles, schema and data into the disconnected temporary database.");
-  psql(`ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;\n${roles}\n${schema}\nSET session_replication_role = replica;\n${data}\n`, true);
+  psql(`ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;\n\\echo RESTORE_PHASE_ROLES\n${roles}\n\\echo RESTORE_PHASE_SCHEMA\n${schema}\n\\echo RESTORE_PHASE_DATA\nSET session_replication_role = replica;\n${data}\n`, true, "supabase_admin");
   await report("Database restore transaction committed successfully.");
 
   for (const { table, columns, rows } of tables) {

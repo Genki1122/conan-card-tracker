@@ -39,6 +39,8 @@ test("restore commands can only target the fixed isolated local container", asyn
   assert.throws(() => localPsqlArgs("production"));
   assert.throws(() => localPsqlArgs("postgresql://example.invalid"));
   assert.ok(!localPsqlArgs().join(" ").includes("--host"));
+  assert.ok(localPsqlArgs("supabase_db_restore-check", "supabase_admin").includes("supabase_admin"));
+  assert.throws(() => localPsqlArgs("supabase_db_restore-check", "unapproved-role"));
 });
 
 test("restore config matches the dump PostgreSQL major version", async () => {
