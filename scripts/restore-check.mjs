@@ -88,7 +88,8 @@ async function verify(dumpDirectory, rehearseHistory = false) {
     if (!tables.find(table => table.table === required)?.rows.length) throw new Error("Required account or record table is missing or empty");
   }
   await report("Restoring saved roles, schema and data into the disconnected temporary database.");
-  psql(`ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;\n\\echo RESTORE_PHASE_ROLES\n${roles}\n\\echo RESTORE_PHASE_SCHEMA\n${schema}\n\\echo RESTORE_PHASE_DATA\nSET session_replication_role = replica;\n${data}\n`, true, "supabase_admin");
+  // Defaults belong to the creating role, even if the dump later changes ownership.
+  psql(`ALTER DEFAULT PRIVILEGES FOR ROLE postgres, supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;\n\\echo RESTORE_PHASE_ROLES\n${roles}\n\\echo RESTORE_PHASE_SCHEMA\n${schema}\n\\echo RESTORE_PHASE_DATA\nSET session_replication_role = replica;\n${data}\n`, true, "supabase_admin");
   await report("Database restore transaction committed successfully.");
 
   for (const { table, columns, rows } of tables) {

@@ -10,12 +10,13 @@
 
 ## 1. Backup Readiness
 
-- [x] Inspect live run logs and secret names without reading credentials. Both required secrets are absent.
+- [x] Inspect live run logs and secret names without reading credentials. Both required secrets were absent at the start of the audit; the owner subsequently configured them privately.
 - [x] Test and implement `scripts/backup-preflight.sh`: list all missing settings, validate PostgreSQL URL and minimum passphrase length, never print values.
 - [x] Update `.github/workflows/supabase-backup.yml`: checkout, preflight, verify complete decrypted archive against original, job summaries, temporary-file cleanup.
 - [x] Update `docs/backup-and-restore.md` with exact setup links and explicit restoration evidence checklist.
 - [x] After owner supplies secrets: run backup and verify encrypted artifact. [Run 41027199973](https://github.com/Genki1122/conan-card-tracker/actions/runs/41027199973) succeeded; decrypt/compare and upload verified.
 - [ ] Perform an isolated restore rehearsal. Use a disposable GitHub runner database without production credentials for the database check. Hosted Auth/project recovery remains a separate owner-approved project check. Never restore into production or reset its credentials.
+- [x] Obtain approval and enable previously missing production history capture after backup and rehearsal. Verify unchanged existing records. Include parent-account cascade deletion in the rehearsal to prevent a history-trigger regression.
 - [ ] Confirm the first scheduled backup after setup.
 
 Tests: `node --test test/backup-config.test.js`; shell syntax and real local GPG round-trip where available. Configuration/SQL file presence is not proof that production backups or state-history triggers are active.
@@ -38,10 +39,11 @@ Tests: unit suite, browser flows at 320/390px in Chromium/WebKit. Existing pass/
 - [x] Update app/SW version references and currentVersion only. No v61 announcement, X post, or new automated user notification.
 - [x] Verify locally, request independent review, publish, watch CI and Pages, compare live assets.
 
-Verification (2026-10-30): 212 unit/configuration tests and 136 isolated Chromium/WebKit scenarios passed. A synthetic GPG round-trip matched the source archive and rejected altered archive bytes. Independent review findings about initialization-time sync and reused signup consent were reproduced, fixed, and re-reviewed. Commit `ea5fce4` passed the new verification gate and Pages deployment in [run 41022776342](https://github.com/Genki1122/conan-card-tracker/actions/runs/41022776342); live app, styles, service worker, and manifest matched local source. No v61 announcement was added. Production backup/restore and physical-device checks remain unverified.
+Verification (2026-10-30, initial reliability release): 212 unit/configuration tests and 136 isolated Chromium/WebKit scenarios passed. A synthetic GPG round-trip matched the source archive and rejected altered archive bytes. Independent review findings about initialization-time sync and reused signup consent were reproduced, fixed, and re-reviewed. Commit `ea5fce4` passed the new verification gate and Pages deployment in [run 41022776342](https://github.com/Genki1122/conan-card-tracker/actions/runs/41022776342); live app, styles, service worker, and manifest matched local source. No v61 announcement was added. Subsequent backup/history operations are recorded in `docs/backup-and-restore.md`. Physical-device checks remain unverified.
 
 ## Owner Dependencies
 
-- `SUPABASE_DB_URL` and `BACKUP_ENCRYPTION_PASSPHRASE` must be entered privately in GitHub Actions Secrets.
-- SMTP settings, delivery logs, production history migration, and a temporary restore target cannot be confirmed from repository code alone.
+- The owner configured `SUPABASE_DB_URL` and `BACKUP_ENCRYPTION_PASSPHRASE` privately in GitHub Actions Secrets. Keep the encryption passphrase independently in the password manager.
+- Production history installation was approved and verified. Hosted Auth/SMTP/project recovery still needs a separately approved temporary project; the isolated database check does not cover these services.
+- The first scheduled backup check is reserved for 2026-10-31 at 06:00 JST; a successful manual backup does not prove scheduled execution.
 - Keep incomplete operational checks explicitly incomplete, even when code tests pass.

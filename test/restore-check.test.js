@@ -44,6 +44,13 @@ test("restore commands can only target the fixed isolated local container", asyn
   assert.throws(() => localPsqlArgs("supabase_db_restore-check", "unapproved-role"));
 });
 
+test("restore removes inherited table grants for both local creator roles before applying saved schema", async () => {
+  const source = await readFile(moduleUrl, "utf8");
+  assert.match(source, /ALTER DEFAULT PRIVILEGES FOR ROLE postgres, supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated/);
+  assert.ok(source.indexOf("ALTER DEFAULT PRIVILEGES") < source.indexOf("${schema}"));
+  assert.doesNotMatch(source, /REVOKE ALL ON (?:TABLE )?(?:public\.)?app_state_versions/i);
+});
+
 test("restore config matches the dump PostgreSQL major version", async () => {
   const { configureDatabase } = await import(moduleUrl);
   const config = 'project_id = "restore-check"\n[db]\nmajor_version = 17\n';
