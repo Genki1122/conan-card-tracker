@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { parse } from "yaml";
 
@@ -72,13 +73,34 @@ test("production history setup is manual and requires a recent encrypted backup"
   const text = await readFile(new URL(".github/workflows/supabase-history-setup.yml", root), "utf8");
   const workflow = parse(text);
   assert.ok(workflow.on.workflow_dispatch.inputs.backup_run_id.required);
+  assert.ok(workflow.on.workflow_dispatch.inputs.rehearsal_run_id.required);
   assert.equal(workflow.on.schedule, undefined);
   assert.match(text, /Backup is not recent/);
   assert.match(text, /--single-transaction/);
   assert.match(text, /lock_timeout=5000/);
   assert.match(text, /app-state-history-migration\.sql/);
+  assert.match(text, /u\.searchParams/);
+  assert.match(text, /sslmode/);
   assert.match(text, /if: always\(\)/);
   assert.doesNotMatch(text, /supabase db reset|--file supabase\/schema\.sql/);
+});
+
+test("production target validation rejects libpq URI overrides without logging secrets", async () => {
+  const workflow = parse(await readFile(new URL(".github/workflows/supabase-history-setup.yml", root), "utf8"));
+  const step = workflow.jobs.setup.steps.find(step => step.name === "Install approved history migration atomically");
+  const script = step.run.match(/node --input-type=module -e '([\s\S]*?)\n'\n/)?.[1];
+  assert.ok(script);
+  const base = "postgresql://postgres.tsfusbqmzmffdlneujny:synthetic%3F%24@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres";
+  for (const [url, status] of [
+    [base, 0], [base + "?sslmode=require", 0],
+    [base + "?host=example.invalid", 1], [base + "?user=other", 1],
+    [base + "?options=-c%20lock_timeout%3D0", 1], [base + "?sslmode=disable", 1],
+    [base + "#fragment", 1], [base.replace("5432", "6543"), 1],
+  ]) {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", env: { SUPABASE_DB_URL: url } });
+    assert.equal(result.status, status);
+    assert.ok(!`${result.stdout}${result.stderr}`.includes("synthetic"));
+  }
 });
 
 test("database permission checks exercise own writes and reject anonymous and cross-user writes", async () => {

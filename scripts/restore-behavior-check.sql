@@ -117,4 +117,18 @@ BEGIN
   END;
 END $$;
 RESET ROLE;
+
+DO $$
+DECLARE synthetic_user uuid := gen_random_uuid();
+BEGIN
+  INSERT INTO auth.users (id, email, raw_user_meta_data)
+  VALUES (synthetic_user, synthetic_user::text || '@example.invalid', '{"username":"restore-check"}'::jsonb);
+  INSERT INTO public.app_states (user_id, data) VALUES (synthetic_user, '{}'::jsonb);
+  UPDATE public.app_states SET data = '{"restoreCheck":true}'::jsonb WHERE user_id = synthetic_user;
+  DELETE FROM auth.users WHERE id = synthetic_user;
+  IF EXISTS (SELECT 1 FROM public.app_states WHERE user_id = synthetic_user)
+    OR EXISTS (SELECT 1 FROM public.app_state_versions WHERE user_id = synthetic_user) THEN
+    RAISE EXCEPTION 'Account deletion did not cascade correctly';
+  END IF;
+END $$;
 ROLLBACK;

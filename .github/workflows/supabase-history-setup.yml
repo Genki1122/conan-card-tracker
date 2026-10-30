@@ -7,6 +7,10 @@ on:
         description: Successful encrypted backup less than one hour old
         required: true
         type: string
+      rehearsal_run_id:
+        description: Successful history rehearsal for this backup and commit
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,9 +31,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
+          REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id }}
         run: |
           set -euo pipefail
           [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$REHEARSAL_RUN_ID" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > "$RUNNER_TEMP/history-backup-run.json"
           jq -e '.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/supabase-backup.yml"' "$RUNNER_TEMP/history-backup-run.json" > /dev/null
           created="$(jq -r .created_at "$RUNNER_TEMP/history-backup-run.json")"
@@ -37,6 +43,8 @@ jobs:
           if (( age < 0 || age > 3600 )); then echo 'Backup is not recent; refusing production setup.'; exit 1; fi
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID/artifacts" --jq '.artifacts' > "$RUNNER_TEMP/history-backup-artifacts.json"
           jq -e 'any(.[]; .expired == false and (.name | test("^supabase-backup-[0-9]{8}T[0-9]{6}Z$")))' "$RUNNER_TEMP/history-backup-artifacts.json" > /dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REHEARSAL_RUN_ID" > "$RUNNER_TEMP/history-rehearsal.json"
+          jq -e --arg sha "$GITHUB_SHA" --arg title "History rehearsal for backup $BACKUP_RUN_ID" '.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/supabase-restore-check.yml" and .head_sha == $sha and .display_title == $title' "$RUNNER_TEMP/history-rehearsal.json" > /dev/null
 
       - name: Ensure PostgreSQL client
         run: |
@@ -59,6 +67,10 @@ jobs:
             try {
               const u = new URL(process.env.SUPABASE_DB_URL);
               if (!["postgres:", "postgresql:"].includes(u.protocol) || u.username !== "postgres.tsfusbqmzmffdlneujny" || !u.hostname.endsWith(".pooler.supabase.com") || u.pathname !== "/postgres") throw new Error();
+                  if (u.hash || (u.port && u.port !== "5432")) throw new Error();
+                  for (const [key, value] of u.searchParams) {
+                    if (key !== "sslmode" || value !== "require") throw new Error();
+                  }
             } catch { console.error("Unexpected database target; refusing setup."); process.exit(1); }
           '
           if ! psql "$SUPABASE_DB_URL" --no-psqlrc --quiet --single-transaction --set ON_ERROR_STOP=1 --set VERBOSITY=sqlstate \
@@ -73,4 +85,4 @@ jobs:
 
       - name: Remove temporary diagnostics
         if: always()
-        run: rm -f -- "$RUNNER_TEMP/history-setup.log" "$RUNNER_TEMP/history-backup-run.json" "$RUNNER_TEMP/history-backup-artifacts.json"
+        run: rm -f -- "$RUNNER_TEMP/history-setup.log" "$RUNNER_TEMP/history-backup-run.json" "$RUNNER_TEMP/history-backup-artifacts.json" "$RUNNER_TEMP/history-rehearsal.json"

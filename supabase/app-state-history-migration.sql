@@ -19,6 +19,13 @@ security definer
 set search_path = ''
 as $$
 begin
+  -- Account deletion cascades here after the parent user has been removed.
+  if tg_op = 'DELETE' and not exists (
+    select 1 from auth.users where id = old.user_id
+  ) then
+    return old;
+  end if;
+
   insert into public.app_state_versions (user_id, data, source_updated_at)
   values (old.user_id, old.data, old.updated_at);
 

@@ -20,6 +20,13 @@ test("app state history keeps previous JSON for 30 days without client write acc
   assert.doesNotMatch(migration, /grant (insert|update|delete)[^;]*app_state_versions/i);
 });
 
+test("history capture allows parent-account deletion without inserting orphan history", async () => {
+  for (const path of ["supabase/app-state-history-migration.sql", "supabase/schema.sql"]) {
+    const sql = await readFile(new URL(path, rootUrl), "utf8");
+    assert.match(sql, /if tg_op = 'DELETE' and not exists\s*\([\s\S]*?from auth\.users[\s\S]*?old\.user_id[\s\S]*?return old;[\s\S]*?insert into public\.app_state_versions/);
+  }
+});
+
 test("daily backup encrypts the complete Supabase logical dump before uploading it", async () => {
   const workflow = await readFile(new URL(".github/workflows/supabase-backup.yml", rootUrl), "utf8");
 

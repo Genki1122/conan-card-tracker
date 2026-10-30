@@ -1,4 +1,5 @@
 name: Isolated Supabase restore check
+run-name: ${{ inputs.rehearse_history && 'History rehearsal' || 'Restore check' }} for backup ${{ inputs.backup_run_id }}
 
 on:
   workflow_dispatch:
