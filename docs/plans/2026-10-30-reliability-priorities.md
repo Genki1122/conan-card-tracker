@@ -34,7 +34,9 @@ Tests: unit suite, browser flows at 320/390px in Chromium/WebKit. Existing pass/
 - [x] Add `.github/workflows/checks.yml` for PRs and reuse it from Pages. `deploy` must depend on verification success; no `continue-on-error` or always-deploy bypass.
 - [x] Add failing deployment-config and silent-release tests. Keep announcement history at v60 while deploying v61; old read notices must not reappear.
 - [x] Update app/SW version references and currentVersion only. No v61 announcement, X post, or new automated user notification.
-- [ ] Verify locally, request independent review, publish, watch CI and Pages, compare live assets.
+- [x] Verify locally, request independent review, publish, watch CI and Pages, compare live assets.
+
+Verification (2026-10-30): 212 unit/configuration tests and 136 isolated Chromium/WebKit scenarios passed. A synthetic GPG round-trip matched the source archive and rejected altered archive bytes. Independent review findings about initialization-time sync and reused signup consent were reproduced, fixed, and re-reviewed. Commit `ea5fce4` passed the new verification gate and Pages deployment in [run 41022776342](https://github.com/Genki1122/conan-card-tracker/actions/runs/41022776342); live app, styles, service worker, and manifest matched local source. No v61 announcement was added. Production backup/restore and physical-device checks remain unverified.
 
 ## Owner Dependencies
 
