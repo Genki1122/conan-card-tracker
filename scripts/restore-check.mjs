@@ -79,7 +79,7 @@ async function report(message) {
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `${message}\n\n`);
 }
 
-async function verify(dumpDirectory) {
+async function verify(dumpDirectory, rehearseHistory = false) {
   const roles = await readFile(join(dumpDirectory, "roles.sql"), "utf8");
   const schema = await readFile(join(dumpDirectory, "schema.sql"), "utf8");
   const data = await readFile(join(dumpDirectory, "data.sql"), "utf8");
@@ -98,6 +98,12 @@ async function verify(dumpDirectory) {
   }
   await report(`All ${tables.length} backed-up tables match: row counts and SHA-256 fingerprints of every record (including complete account JSON). No record contents are logged.`);
 
+  if (rehearseHistory) {
+    const migration = await readFile(new URL("../supabase/app-state-history-migration.sql", import.meta.url), "utf8");
+    const verification = await readFile(new URL("history-setup-verify.sql", import.meta.url), "utf8");
+    psql(`LOCK TABLE public.app_states IN SHARE ROW EXCLUSIVE MODE;\nCREATE TEMP TABLE history_setup_before ON COMMIT DROP AS SELECT user_id, md5(row(state.*)::text) AS fingerprint FROM public.app_states AS state;\n${migration}\n${verification}`, true);
+    await report("REHEARSAL ONLY: applied the reviewed history migration to the disconnected clone. This does not confirm production installation.");
+  }
   const metadata = JSON.parse(psql(`SELECT json_build_object(
     'historyTable', to_regclass('public.app_state_versions') IS NOT NULL,
     'historyTrigger', EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = to_regclass('public.app_states') AND tgname = 'capture_app_state_version_before_change' AND tgenabled IN ('O', 'A')),
@@ -117,8 +123,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const config = await readFile(process.argv[4], "utf8");
       const data = await readFile(join(process.argv[3], "../data.sql"), "utf8");
       await writeFile(process.argv[4], configureDatabase(config, schema, data));
-    } else if (process.argv[2] === "verify") {
-      await verify(process.argv[3]);
+    } else if (["verify", "rehearse-history"].includes(process.argv[2])) {
+      await verify(process.argv[3], process.argv[2] === "rehearse-history");
     } else throw new Error("Unknown restore-check operation");
   } catch (error) {
     // Only fixed application messages and SQLSTATE codes are emitted; no raw database errors.

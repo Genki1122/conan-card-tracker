@@ -56,6 +56,7 @@ test("restore workflow only uses saved backups, never production DB credentials"
   const workflowText = await readFile(new URL(".github/workflows/supabase-restore-check.yml", root), "utf8");
   const workflow = parse(workflowText);
   assert.ok(workflow.on.workflow_dispatch);
+  assert.equal(workflow.on.workflow_dispatch.inputs.rehearse_history.default, false);
   assert.equal(workflow.on.push, undefined);
   assert.equal(workflow.permissions.actions, "read");
   assert.doesNotMatch(workflowText, /SUPABASE_DB_URL|RESTORE_DB_URL|supabase db (push|reset)|supabase link/);
@@ -65,6 +66,19 @@ test("restore workflow only uses saved backups, never production DB credentials"
   assert.doesNotMatch(workflowText, /upload-artifact/);
   const steps = workflow.jobs.restore.steps;
   assert.ok(steps.findIndex(step => step.name === "Isolate local database") < steps.findIndex(step => step.name === "Restore and verify backup"));
+});
+
+test("production history setup is manual and requires a recent encrypted backup", async () => {
+  const text = await readFile(new URL(".github/workflows/supabase-history-setup.yml", root), "utf8");
+  const workflow = parse(text);
+  assert.ok(workflow.on.workflow_dispatch.inputs.backup_run_id.required);
+  assert.equal(workflow.on.schedule, undefined);
+  assert.match(text, /Backup is not recent/);
+  assert.match(text, /--single-transaction/);
+  assert.match(text, /lock_timeout=5000/);
+  assert.match(text, /app-state-history-migration\.sql/);
+  assert.match(text, /if: always\(\)/);
+  assert.doesNotMatch(text, /supabase db reset|--file supabase\/schema\.sql/);
 });
 
 test("database permission checks exercise own writes and reject anonymous and cross-user writes", async () => {

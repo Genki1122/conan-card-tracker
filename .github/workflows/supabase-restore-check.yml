@@ -7,6 +7,10 @@ on:
         description: Successful main-branch encrypted backup run ID
         required: true
         type: string
+      rehearse_history:
+        description: Apply the reviewed history migration to the isolated clone only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -86,7 +90,12 @@ jobs:
           test "$(docker exec supabase_db_restore-check psql -U postgres -d postgres -Atc 'SHOW cron.launch_active_jobs')" = off
 
       - name: Restore and verify backup
-        run: node scripts/restore-check.mjs verify "$RUNNER_TEMP/restore-dump"
+        env:
+          REHEARSE_HISTORY: ${{ inputs.rehearse_history }}
+        run: |
+          operation=verify
+          if [[ "$REHEARSE_HISTORY" == true ]]; then operation=rehearse-history; fi
+          node scripts/restore-check.mjs "$operation" "$RUNNER_TEMP/restore-dump"
 
       - name: Remove temporary data
         if: always()

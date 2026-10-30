@@ -1,0 +1,76 @@
+name: Enable app-state history after backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: Successful encrypted backup less than one hour old
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: supabase-history-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require recent successful backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > "$RUNNER_TEMP/history-backup-run.json"
+          jq -e '.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/supabase-backup.yml"' "$RUNNER_TEMP/history-backup-run.json" > /dev/null
+          created="$(jq -r .created_at "$RUNNER_TEMP/history-backup-run.json")"
+          age=$(( $(date -u +%s) - $(date -u -d "$created" +%s) ))
+          if (( age < 0 || age > 3600 )); then echo 'Backup is not recent; refusing production setup.'; exit 1; fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID/artifacts" --jq '.artifacts' > "$RUNNER_TEMP/history-backup-artifacts.json"
+          jq -e 'any(.[]; .expired == false and (.name | test("^supabase-backup-[0-9]{8}T[0-9]{6}Z$")))' "$RUNNER_TEMP/history-backup-artifacts.json" > /dev/null
+
+      - name: Ensure PostgreSQL client
+        run: |
+          if ! command -v psql > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Install approved history migration atomically
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGCONNECT_TIMEOUT: '20'
+          PGSSLMODE: require
+          PGOPTIONS: '-c statement_timeout=60000 -c lock_timeout=5000'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          node --input-type=module -e '
+            try {
+              const u = new URL(process.env.SUPABASE_DB_URL);
+              if (!["postgres:", "postgresql:"].includes(u.protocol) || u.username !== "postgres.tsfusbqmzmffdlneujny" || !u.hostname.endsWith(".pooler.supabase.com") || u.pathname !== "/postgres") throw new Error();
+            } catch { console.error("Unexpected database target; refusing setup."); process.exit(1); }
+          '
+          if ! psql "$SUPABASE_DB_URL" --no-psqlrc --quiet --single-transaction --set ON_ERROR_STOP=1 --set VERBOSITY=sqlstate \
+            --command 'LOCK TABLE public.app_states IN SHARE ROW EXCLUSIVE MODE' \
+            --command 'CREATE TEMP TABLE history_setup_before ON COMMIT DROP AS SELECT user_id, md5(row(state.*)::text) AS fingerprint FROM public.app_states AS state' \
+            --file supabase/app-state-history-migration.sql \
+            --file scripts/history-setup-verify.sql > "$RUNNER_TEMP/history-setup.log" 2>&1; then
+            echo 'History setup failed; transaction rolled back. Raw database diagnostics withheld.'
+            exit 1
+          fi
+          echo 'History table, capture trigger and baseline snapshots installed. Existing app-state fingerprints remained identical. Transaction committed.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary diagnostics
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/history-setup.log" "$RUNNER_TEMP/history-backup-run.json" "$RUNNER_TEMP/history-backup-artifacts.json"
