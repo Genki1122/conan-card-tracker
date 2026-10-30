@@ -11,7 +11,8 @@ const root = new URL("../", import.meta.url);
 const source = await readFile(new URL("src/app.js", root), "utf8");
 const version = source.match(/const appVersion = "(\d+)"/)[1];
 const publishedNotices = JSON.parse(await readFile(new URL("releases.json", root), "utf8"));
-const currentNotice = publishedNotices.releases.find(entry => entry.version === version);
+// Synthetic announcements exercise notice behavior independently of silent deployments.
+const currentNotice = { ...publishedNotices.releases[0], version };
 const futureVersion = String(Number(version) + 1);
 const oldCommit = "7159b18cbef144ca90a321bb24887d9ad3fbe198";
 const oldFiles = Object.fromEntries(["src/app.js", "index.html", "sw.js"].map(path => [path,
@@ -41,6 +42,7 @@ let dropMetadata = false;
 let scheduledAt = "";
 let extraReleases = [];
 let metadataRequests = 0;
+let usePublishedNotices = false;
 const server = createServer(async (request, response) => {
   try {
     const path = new URL(request.url, "http://localhost").pathname;
@@ -52,7 +54,7 @@ const server = createServer(async (request, response) => {
       if (dropMetadata) { request.socket.destroy(); return; }
       if (failMetadata) { response.writeHead(503).end("Offline test"); return; }
       response.writeHead(200, {"Content-Type":"application/json","Cache-Control":"no-store"})
-        .end(JSON.stringify({currentVersion:advertisedVersion,releases:[
+        .end(JSON.stringify({currentVersion:advertisedVersion,releases:usePublishedNotices ? publishedNotices.releases : [
           {...release(advertisedVersion),availableAt:scheduledAt},
           ...(scheduledAt ? [release(version)] : []), ...extraReleases
         ]}));
@@ -74,13 +76,14 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 let passed = 0;
 
-async function run(browser, engine, name, check, {realWorker=false,old=false,unread=false,width=390}={}) {
+async function run(browser, engine, name, check, {realWorker=false,old=false,unread=false,width=390,silent=false}={}) {
   deployment = old ? "old" : "current";
   advertisedVersion = old ? oldVersion : version;
   failMetadata = false;
   dropMetadata = false;
   scheduledAt = "";
   extraReleases = [];
+  usePublishedNotices = silent;
   const context = await browser.newContext({viewport:{width,height:844},serviceWorkers:realWorker ? "allow" : "block"});
   await context.route("**/*", route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await context.addInitScript(({seen,realWorker}) => {
@@ -104,7 +107,7 @@ async function run(browser, engine, name, check, {realWorker=false,old=false,unr
       };
       Object.defineProperty(navigator, "serviceWorker", {value:worker,configurable:true});
     }
-  }, {seen:unread ? String(Number(advertisedVersion)-1) : advertisedVersion,realWorker});
+  }, {seen:silent ? "60" : unread ? String(Number(advertisedVersion)-1) : advertisedVersion,realWorker});
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -162,6 +165,23 @@ try {
   for (const [engine, type] of [["chromium", chromium], ["webkit", webkit]]) {
     const browser = await type.launch({headless:true});
     try {
+      await run(browser, engine, "silent deployment keeps read announcements hidden and updates available in the menu", async page => {
+        await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        advertisedVersion = futureVersion;
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        await openNotices(page);
+        assert.equal(await page.locator("[data-apply-update]").isVisible(), true);
+        assert.equal(await page.locator("[data-release-unread]").count(), 0);
+        assert.equal(await page.locator(`[data-open-release="${version}"]`).count(), 0);
+        deployment = "future";
+        await apply(page, futureVersion, "[data-apply-update]");
+        await refresh(page);
+        assert.equal(await page.locator("#updateBanner").isVisible(), false);
+        assert.equal(await page.evaluate(() => localStorage.getItem("conan-card-tracker-release-seen-v1")), "60");
+      }, {realWorker:true,silent:true});
       await run(browser, engine, "same-version worker events stay hidden even after reloading", async page => {
         for (let i=0; i<3; i++) {
           await refresh(page);

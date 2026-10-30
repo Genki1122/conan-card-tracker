@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { availableReleases, normalizeReleaseManifest } from "../src/release-notes.js";
 
 // Optional integration check: the browser never connects to the live database.
 const { chromium, webkit } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = new URL("../", import.meta.url);
 const app = await readFile(new URL("src/app.js", root), "utf8");
 const releaseManifest = JSON.parse(await readFile(new URL("releases.json", root), "utf8"));
-const currentRelease = releaseManifest.releases.find(release => release.version === releaseManifest.currentVersion);
+const currentRelease = availableReleases(normalizeReleaseManifest(releaseManifest))[0];
 const cloud = await readFile(new URL("src/cloud.js", root), "utf8");
 const exports = [...cloud.matchAll(/^export (?:async )?function (\w+)/gm)].map(match => match[1]);
 const mocks = {

@@ -21,11 +21,12 @@ jobs:
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
       BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Validate backup secrets
         shell: bash
-        run: |
-          test -n "$SUPABASE_DB_URL" || { echo "SUPABASE_DB_URL is not configured"; exit 1; }
-          test -n "$BACKUP_ENCRYPTION_PASSPHRASE" || { echo "BACKUP_ENCRYPTION_PASSPHRASE is not configured"; exit 1; }
+        run: bash scripts/backup-preflight.sh
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
@@ -40,6 +41,7 @@ jobs:
           echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
           echo "dir=$RUNNER_TEMP/supabase-backup-$stamp" >> "$GITHUB_OUTPUT"
           echo "archive=$RUNNER_TEMP/supabase-backup-$stamp.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "verified=$RUNNER_TEMP/supabase-backup-$stamp.verified.tar.gz" >> "$GITHUB_OUTPUT"
           echo "encrypted=$RUNNER_TEMP/supabase-backup-$stamp.tar.gz.gpg" >> "$GITHUB_OUTPUT"
 
       - name: Create logical dumps
@@ -76,12 +78,17 @@ jobs:
         shell: bash
         run: |
           printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
-            --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
-            --decrypt "${{ steps.backup.outputs.encrypted }}" \
-            | tar -tzf - \
-            | grep -q "./manifest.json"
+            --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --output "${{ steps.backup.outputs.verified }}" \
+            --decrypt "${{ steps.backup.outputs.encrypted }}"
+          cmp -- "${{ steps.backup.outputs.archive }}" "${{ steps.backup.outputs.verified }}"
+          tar -tzf "${{ steps.backup.outputs.verified }}" > "${{ steps.backup.outputs.dir }}/contents.txt"
+          for file in roles.sql schema.sql data.sql manifest.json; do
+            grep -Fx "./$file" "${{ steps.backup.outputs.dir }}/contents.txt"
+          done
 
       - name: Upload encrypted backup
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: supabase-backup-${{ steps.backup.outputs.stamp }}
@@ -89,3 +96,30 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+      - name: Backup result
+        if: always()
+        shell: bash
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          if [[ "$UPLOAD_OUTCOME" == success ]]; then
+            printf '## Backup created\n\nEncrypted archive uploaded (30-day retention). Full decryption matched the original archive. This does not replace an isolated database restore drill.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '\n## Backup incomplete\n\nNo successful backup upload was confirmed for this run. Check the failed step above; do not treat this run as a recovery point.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Clean temporary backup files
+        if: always()
+        shell: bash
+        env:
+          BACKUP_DIR: ${{ steps.backup.outputs.dir }}
+          ARCHIVE: ${{ steps.backup.outputs.archive }}
+          VERIFIED: ${{ steps.backup.outputs.verified }}
+          ENCRYPTED: ${{ steps.backup.outputs.encrypted }}
+        run: |
+          for path in "$BACKUP_DIR" "$ARCHIVE" "$VERIFIED" "$ENCRYPTED"; do
+            if [[ -n "$path" && "$path" == "$RUNNER_TEMP"/supabase-backup-* ]]; then
+              rm -rf -- "$path"
+            fi
+          done

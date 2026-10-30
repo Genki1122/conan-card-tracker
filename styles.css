@@ -1996,10 +1996,14 @@ label {
 
 .cloud-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 10px;
   align-items: baseline;
 }
+
+.cloud-head strong { flex-shrink: 0; }
+.cloud-head span { flex: 1 1 120px; }
 
 .cloud-head span,
 .cloud-message {
@@ -2077,6 +2081,37 @@ label {
 
 .existing-login label { margin-top: 10px; }
 .existing-login .primary-button { margin-top: 2px; }
+
+.auth-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.auth-mode-switch button {
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 800;
+}
+
+.auth-mode-switch button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--card-2);
+}
+
+.sync-guidance { display: grid; gap: 6px; }
+.sync-guidance span, .sync-guidance small { color: var(--muted); line-height: 1.5; }
+.sync-guidance span { font-size: 0.82rem; }
+.cloud-head span, .logout-email { min-width: 0; overflow-wrap: anywhere; }
+.account-actions button, .cloud-actions details button { margin-top: 12px; width: 100%; }
 
 .consent-field {
   grid-template-columns: 22px minmax(0, 1fr);

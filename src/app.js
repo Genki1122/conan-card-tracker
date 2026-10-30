@@ -27,6 +27,7 @@ import {
   summarizeRounds
 } from "./analytics.js";
 import { stateSummary, statesEqual } from "./sync-state.js";
+import { logoutBlockReason, syncGuidance, syncRetryAction } from "./account-ux.js";
 import { createInitialState, removeLegacyMockState } from "./initial-state.js";
 import {
   accountOnboardingIntent,
@@ -41,7 +42,7 @@ import {
   loadAuthChallenge,
   normalizeOtpCode,
   saveAuthChallenge
-} from "./auth-challenge.js?v=60";
+} from "./auth-challenge.js?v=61";
 import {
   buildAdminDashboard,
   buildAdminOverview,
@@ -55,7 +56,7 @@ import {
   duplicateAdminUsers,
   endAdminPreview
 } from "./admin-view.js";
-import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=60";
+import { authEmailErrorMessage, authOtpErrorMessage } from "./auth-feedback.js?v=61";
 import {
   activateAnonymousStorage,
   activateUserStorage,
@@ -163,13 +164,13 @@ import {
   signOutCloud,
   updateProfileUsername,
   verifyEmailOtp
-} from "./cloud.js?v=60";
+} from "./cloud.js?v=61";
 
 const storageBaseKey = "conan-card-tracker-v2";
 const legacyStorageKey = "conan-card-match-casebook";
 const syncMetaBaseKey = "conan-card-tracker-sync-meta-v1";
 const termsVersion = "2026-07-23-v2";
-const appVersion = "60";
+const appVersion = "61";
 const initialStorageScope = activateAnonymousStorage({
   stateBaseKey: storageBaseKey,
   syncBaseKey: syncMetaBaseKey
@@ -222,9 +223,14 @@ let cloudMessage = "";
 let cloudSaveTimer = null;
 let cloudSaveInFlight = false;
 let cloudSavePending = false;
+let cloudOperationCount = 0;
+let cloudInitializationCount = 0;
+let logoutInFlight = false;
 let cloudUpdatedAt = syncMeta.updatedAt || null;
 let localDirty = Boolean(syncMeta.dirty);
 let accountOnboardingActive = accountOnboardingIntent(window.location.search);
+let authMode = accountOnboardingActive ? "signup" : "login";
+const authDraft = { email: "", username: "", consent: false };
 let cloudConflict = false;
 let pendingRemoteState = null;
 let accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
@@ -544,7 +550,8 @@ function loadSyncMeta() {
 function saveSyncMeta() {
   syncMeta = {
     dirty: localDirty,
-    updatedAt: cloudUpdatedAt || null
+    updatedAt: cloudUpdatedAt || null,
+    confirmedAt: syncMeta.confirmedAt || null
   };
   localStorage.setItem(syncMetaStorageKey, JSON.stringify(syncMeta));
 }
@@ -557,6 +564,7 @@ function markLocalDirty() {
 function markCloudSynced(updatedAt) {
   cloudUpdatedAt = updatedAt || cloudUpdatedAt;
   localDirty = false;
+  syncMeta.confirmedAt = cloudUpdatedAt;
   saveSyncMeta();
 }
 
@@ -690,7 +698,7 @@ function saveState() {
 }
 
 function scheduleCloudSave() {
-  if (adminPreview || !cloudStatus.signedIn || cloudConflict) return;
+  if (adminPreview || !ownsCurrentAccountStorage() || cloudConflict) return;
   window.clearTimeout(cloudSaveTimer);
   if (!navigator.onLine) {
     cloudMessage = "オフライン・未同期";
@@ -703,7 +711,7 @@ function scheduleCloudSave() {
 }
 
 async function flushCloudSave() {
-  if (adminPreview || !cloudStatus.signedIn || cloudConflict) return;
+  if (adminPreview || !ownsCurrentAccountStorage() || cloudConflict) return;
   if (cloudSaveInFlight) {
     cloudSavePending = true;
     return;
@@ -737,6 +745,7 @@ async function flushCloudSave() {
   } finally {
     cloudSaveInFlight = false;
     renderSyncStatus();
+    if (requestEpoch === storageEpoch) rerenderOpenMenu();
     if (cloudSavePending) scheduleCloudSave();
   }
 }
@@ -2538,10 +2547,23 @@ function openDialog(mode, targetId = null) {
 
   if (mode === "cloudSettings") {
     dialogKicker.textContent = cloudStatus.signedIn ? "Cloud" : "Account";
-    dialogTitle.textContent = cloudStatus.signedIn ? "クラウド同期" : "ユーザー登録・ログイン";
+    dialogTitle.textContent = cloudStatus.signedIn ? "クラウド同期" : authMode === "signup" ? "新規登録" : "ログイン";
     dialogSubmit.hidden = true;
     const backToMenu = accountOnboardingActive ? "" : `<button class="sheet-back-button" type="button" data-open-menu-panel="menu">‹ メニュー</button>`;
     dialogFields.innerHTML = `${backToMenu}${cloudMenuMarkup()}`;
+  }
+
+  if (mode === "logoutConfirm") {
+    const reason = logoutBlockReason(accountSyncFlags());
+    dialogKicker.textContent = "Account";
+    dialogTitle.textContent = reason ? "ログアウト前に同期を確認" : "ログアウトしますか？";
+    dialogSubmit.hidden = true;
+    dialogFields.innerHTML = `
+      <p class="form-note">${escapeHtml(reason || "アカウントの記録は削除されません。再度見るには、同じメールアドレスでログインしてください。")}</p>
+      ${reason ? "" : `<p class="logout-email">${escapeHtml(cloudStatus.email)}</p>`}
+      <button class="primary-button inline-action" type="button" data-open-menu-panel="cloudSettings">${reason ? "同期を確認" : "戻る"}</button>
+      ${reason ? "" : '<button class="danger-button" type="button" data-confirm-logout>ログアウトする</button>'}
+    `;
   }
 
   if (mode === "dataSettings") {
@@ -2790,6 +2812,7 @@ function releaseDialogFocus() {
 }
 
 entryForm.addEventListener("submit", (event) => {
+  if (logoutInFlight) { event.preventDefault(); return; }
   if (event.submitter?.value === "cancel") {
     releaseDialogFocus();
     return;
@@ -3280,6 +3303,9 @@ dialogFields.addEventListener("change", (event) => {
 });
 
 dialogFields.addEventListener("input", (event) => {
+  if (["cloudEmail", "existingCloudEmail"].includes(event.target.name)) authDraft.email = event.target.value;
+  if (event.target.name === "cloudUsername") authDraft.username = event.target.value;
+  if (event.target.name === "termsAccepted") authDraft.consent = event.target.checked;
   if (event.target.closest("input[name='adminDeleteConfirmation']")) syncAdminAccountDeleteButton();
   const playerInput = event.target.closest("[data-player-name-input]");
   if (playerInput && !event.isComposing) updatePlayerNameSuggestions(playerInput);
@@ -3300,6 +3326,14 @@ dialogFields.addEventListener("focusin", (event) => {
 });
 
 dialogFields.addEventListener("click", (event) => {
+  if (logoutInFlight) return;
+  const authModeButton = event.target.closest("[data-auth-mode]");
+  if (authModeButton) {
+    authMode = authModeButton.dataset.authMode === "signup" ? "signup" : "login";
+    cloudMessage = "";
+    openDialog("cloudSettings");
+    return;
+  }
   if (event.target.closest("[data-close-monthly-share-guide]")) {
     dialog.close();
     return;
@@ -3439,7 +3473,7 @@ dialogFields.addEventListener("click", (event) => {
       usernameInput.setCustomValidity("");
       return;
     }
-    if (!email) {
+    if (!email || !input.checkValidity()) {
       input.setCustomValidity("メールアドレスを入力してください");
       input.reportValidity();
       input.setCustomValidity("");
@@ -3472,6 +3506,8 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-reset-registration]")) {
+    authMode = registrationFeedback?.mode || "login";
+    authDraft.email = registrationFeedback?.email || authDraft.email;
     clearAuthChallenge(localStorage);
     registrationFeedback = null;
     cloudMessage = "";
@@ -3483,7 +3519,7 @@ dialogFields.addEventListener("click", (event) => {
     const button = event.target.closest("[data-cloud-existing-login]");
     const input = dialogFields.querySelector("input[name='existingCloudEmail']");
     const email = input.value.trim();
-    if (!email) {
+    if (!email || !input.checkValidity()) {
       input.setCustomValidity("メールアドレスを入力してください");
       input.reportValidity();
       input.setCustomValidity("");
@@ -3622,12 +3658,29 @@ dialogFields.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-sync-retry]")) {
+    if (!cloudStatus.signedIn) return;
+    const action = syncRetryAction(accountSyncFlags());
+    if (action === "offline") {
+      cloudMessage = "オフラインです。接続が戻ってから同期を確認してください。";
+      openDialog("cloudSettings");
+    } else if (action === "save") {
+      window.clearTimeout(cloudSaveTimer);
+      flushCloudSave();
+    } else if (action === "check") {
+      pullCloudState({ uploadWhenEmpty: true });
+    }
+    return;
+  }
+
   if (event.target.closest("[data-cloud-download]")) {
+    if (accountSyncFlags().busy) return;
     pullCloudState();
     return;
   }
 
   if (event.target.closest("[data-cloud-use-remote]")) {
+    if (accountSyncFlags().busy) return;
     if (!pendingRemoteState) return;
     const local = pendingRemoteState.localSummary;
     const confirmed = confirm(`クラウドの内容を使用しますか？\nこの端末の ${local.decks}デッキ・${local.sessions}大会・${local.matches}試合 は置き換わります。`);
@@ -3638,17 +3691,31 @@ dialogFields.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-cloud-upload]")) {
+    if (accountSyncFlags().busy) return;
     pushCloudState();
     return;
   }
 
   if (event.target.closest("[data-cloud-force-upload]")) {
+    if (accountSyncFlags().busy) return;
     const confirmed = confirm("クラウド上の内容を、この端末のデータで上書きしますか？");
     if (confirmed) pushCloudState({ force: true });
     return;
   }
 
   if (event.target.closest("[data-cloud-logout]")) {
+    openDialog("logoutConfirm");
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-logout]")) {
+    if (logoutBlockReason(accountSyncFlags())) {
+      openDialog("logoutConfirm");
+      return;
+    }
+    logoutInFlight = true;
+    authDraft.email = cloudStatus.email || "";
+    event.target.closest("button").disabled = true;
     signOutCloud()
       .then((nextStatus) => {
         cloudStatus = nextStatus;
@@ -3657,13 +3724,17 @@ dialogFields.addEventListener("click", (event) => {
         accountContext = { schemaReady: false, username: "", termsAccepted: false, termsVersion: "", role: "" };
         adminState = { loading: false, error: "", data: null, raw: null };
         cloudMessage = "ログアウトしました";
+        authMode = "login";
+        authDraft.username = "";
+        authDraft.consent = false;
         render();
         openDialog("cloudSettings");
       })
       .catch((error) => {
         cloudMessage = `ログアウト失敗: ${error.message}`;
         openDialog("cloudSettings");
-      });
+      })
+      .finally(() => { logoutInFlight = false; });
     return;
   }
 
@@ -3960,6 +4031,7 @@ if (accountOnboardingActive) {
 refreshCloudSession();
 initializeReleaseNotes();
 
+dialog.addEventListener("cancel", (event) => { if (logoutInFlight) event.preventDefault(); });
 dialog.addEventListener("close", () => {
   if (!dialog.open) finishReleaseReading();
   closeCaseCardDialog();
@@ -4289,6 +4361,7 @@ async function refreshCloudSession() {
     return;
   }
 
+  cloudInitializationCount += 1;
   try {
     cloudStatus = await initializeCloud((nextStatus) => {
       cloudStatus = nextStatus;
@@ -4297,6 +4370,8 @@ async function refreshCloudSession() {
     await refreshEnvironmentCatalog(false);
     if (cloudStatus.signedIn) {
       activateUserLocalState(cloudStatus.userId);
+      authDraft.username = "";
+      authDraft.consent = false;
       clearAuthChallenge(localStorage);
       registrationFeedback = null;
       try {
@@ -4319,6 +4394,9 @@ async function refreshCloudSession() {
     rerenderOpenMenu();
   } catch (error) {
     cloudMessage = `クラウド接続失敗: ${error.message}`;
+    rerenderOpenMenu();
+  } finally {
+    cloudInitializationCount -= 1;
     rerenderOpenMenu();
   }
 }
@@ -4380,8 +4458,10 @@ function closeAdminUserPreview() {
 }
 
 async function pullCloudState(options = {}) {
+  if (!ownsCurrentAccountStorage() || adminPreview) return;
   const { uploadWhenEmpty = false, silent = false } = options;
   const requestEpoch = storageEpoch;
+  cloudOperationCount += 1;
   try {
     if (!silent) {
       cloudMessage = "クラウド読込中";
@@ -4416,22 +4496,29 @@ async function pullCloudState(options = {}) {
     }
 
     if (uploadWhenEmpty) {
-      await pushCloudState({ silent: true });
-      cloudMessage = "この端末のデータをクラウドへ保存しました";
+      const saved = await pushCloudState({ silent: true });
+      if (requestEpoch !== storageEpoch) return;
+      if (saved) cloudMessage = "この端末のデータをクラウドへ保存しました";
     } else {
       cloudMessage = "クラウドにデータはまだありません";
     }
     rerenderOpenMenu();
   } catch (error) {
+    if (requestEpoch !== storageEpoch) return;
     cloudMessage = `クラウド読込失敗: ${error.message}`;
     rerenderOpenMenu();
+  } finally {
+    cloudOperationCount -= 1;
+    if (requestEpoch === storageEpoch) rerenderOpenMenu();
   }
 }
 
 async function pushCloudState(options = {}) {
+  if (!ownsCurrentAccountStorage() || adminPreview) return false;
   const { silent = false, force = false } = options;
   const requestEpoch = storageEpoch;
   const snapshot = JSON.parse(JSON.stringify(state));
+  cloudOperationCount += 1;
   try {
     if (!silent) {
       cloudMessage = "クラウド保存中";
@@ -4461,6 +4548,9 @@ async function pushCloudState(options = {}) {
     cloudMessage = `クラウド保存失敗: ${error.message}`;
     rerenderOpenMenu();
     return false;
+  } finally {
+    cloudOperationCount -= 1;
+    if (requestEpoch === storageEpoch) rerenderOpenMenu();
   }
 }
 
@@ -4683,8 +4773,28 @@ function releaseHistoryMarkup(manifest) {
   `;
 }
 
+function ownsCurrentAccountStorage() {
+  return Boolean(cloudStatus.signedIn && cloudStatus.userId && activeStorageUserId === cloudStatus.userId);
+}
+
+function accountSyncFlags() {
+  return {
+    signedIn: cloudStatus.signedIn,
+    online: navigator.onLine,
+    dirty: localDirty,
+    conflict: cloudConflict || Boolean(pendingRemoteState),
+    busy: cloudSaveInFlight || cloudOperationCount > 0 || cloudInitializationCount > 0 || accountRecovery.saving
+      || (cloudStatus.signedIn && !ownsCurrentAccountStorage()),
+    updatedAt: cloudUpdatedAt,
+    confirmedAt: syncMeta.confirmedAt,
+    error: cloudMessage.includes("失敗")
+  };
+}
+
 function cloudMenuMarkup() {
   const config = getCloudConfig();
+  const flags = accountSyncFlags();
+  const guidance = syncGuidance(flags);
   const statusText = cloudStatus.signedIn
     ? accountContext.username || cloudStatus.email
     : cloudStatus.configured
@@ -4711,24 +4821,33 @@ function cloudMenuMarkup() {
         </details>
       `}
       ${cloudStatus.configured && !cloudStatus.signedIn ? registrationFeedback ? registrationSentMarkup() : `
+        <div class="auth-mode-switch" role="group" aria-label="アカウント操作">
+          <button type="button" data-auth-mode="login" aria-pressed="${authMode === "login"}">ログイン</button>
+          <button type="button" data-auth-mode="signup" aria-pressed="${authMode === "signup"}">新規登録</button>
+        </div>
+        ${authMode === "login" ? `
+          <p class="form-note">以前登録したメールアドレスでログインしてください。Safariとホーム画面のアプリで、別々にログインが必要な場合があります。</p>
+          <label>メールアドレス<input name="existingCloudEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeHtml(authDraft.email)}"></label>
+          <button class="primary-button inline-action" type="button" data-cloud-existing-login>ログインコードを受け取る</button>
+        ` : `
         <div class="account-intro">
           <strong>無料でユーザー登録</strong>
           <span>ユーザー名とメールアドレスを登録します。</span>
         </div>
-        <label>ユーザー名<input name="cloudUsername" autocomplete="nickname" maxlength="20" placeholder="2〜20文字"></label>
-        <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label>ユーザー名<input name="cloudUsername" autocomplete="nickname" maxlength="20" placeholder="2〜20文字" value="${escapeHtml(authDraft.username)}"></label>
+        <label>メールアドレス<input name="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeHtml(authDraft.email)}"></label>
         ${termsDisclosureMarkup()}
-        <label class="consent-field"><input name="termsAccepted" type="checkbox">利用規約とプライバシーポリシーに同意する</label>
+        <label class="consent-field"><input name="termsAccepted" type="checkbox" ${authDraft.consent ? "checked" : ""}>利用規約とプライバシーポリシーに同意する</label>
         <button class="primary-button inline-action" type="button" data-cloud-login>登録コードをメールで受け取る</button>
         <p class="form-note">メールに届く認証コードを、この画面へ入力します。パスワードは不要です。</p>
-        <details class="terms-disclosure existing-login">
-          <summary>登録済みの方はこちら</summary>
-          <p>Safariではログイン済みでも、ホーム画面のアプリではここからログインコードを受け取ってください。</p>
-          <label>メールアドレス<input name="existingCloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
-          <button class="primary-button inline-action" type="button" data-cloud-existing-login>ログインコードを受け取る</button>
-        </details>
+        `}
       ` : ""}
       ${cloudStatus.signedIn ? `
+        <div class="sync-guidance" role="status">
+          <strong>${escapeHtml(guidance.title)}</strong>
+          <span>${escapeHtml(guidance.detail)}</span>
+          <small>最終同期：${Number.isFinite(Date.parse(syncMeta.confirmedAt)) ? escapeHtml(formatSyncTime(syncMeta.confirmedAt)) : "未確認"}</small>
+        </div>
         ${accountContext.schemaReady && !accountContext.termsAccepted ? `
           <div class="account-intro account-attention">
             <strong>アカウント情報を完了してください</strong>
@@ -4747,6 +4866,7 @@ function cloudMenuMarkup() {
           </details>
         ` : ""}
         <div class="cloud-actions">
+          <button class="primary-button inline-action" type="button" data-sync-retry ${flags.busy ? "disabled" : ""}>${flags.busy ? "同期を確認中..." : flags.dirty && !flags.conflict ? "同期を再試行" : "同期を確認"}</button>
           ${pendingRemoteState ? `
             <div class="sync-conflict">
               <strong>同期する内容を選択</strong>
@@ -4756,21 +4876,25 @@ function cloudMenuMarkup() {
                 ${syncChoiceMarkup("クラウド", pendingRemoteState.remoteSummary)}
               </div>
             </div>
-            <button class="primary-button inline-action" type="button" data-cloud-use-remote>クラウドの内容を使う</button>
-            <button class="danger-button" type="button" data-cloud-force-upload>この端末の内容で上書き</button>
+            <button class="primary-button inline-action" type="button" data-cloud-use-remote ${flags.busy ? "disabled" : ""}>クラウドの内容を使う</button>
+            <button class="danger-button" type="button" data-cloud-force-upload ${flags.busy ? "disabled" : ""}>この端末の内容で上書き</button>
           ` : cloudConflict ? `
             <div class="sync-conflict">
               <strong>同期競合を検知</strong>
               <span>クラウドから読み込んで内容を確認してください。</span>
             </div>
-            <button class="primary-button inline-action" type="button" data-cloud-download>クラウドとの差分を確認</button>
-            <button class="danger-button" type="button" data-cloud-force-upload>この端末の内容で上書き</button>
           ` : `
-            <button class="primary-button inline-action" type="button" data-cloud-download>クラウドから読込</button>
-            <button class="primary-button inline-action ghost-action" type="button" data-cloud-upload>この端末をアップロード</button>
+            <details class="terms-disclosure">
+              <summary>同期の詳細操作</summary>
+              <button class="primary-button inline-action ghost-action" type="button" data-cloud-download ${flags.busy ? "disabled" : ""}>クラウドとの差分を確認</button>
+              <button class="primary-button inline-action ghost-action" type="button" data-cloud-upload ${flags.busy ? "disabled" : ""}>この端末をアップロード</button>
+            </details>
           `}
-          <button class="danger-button" type="button" data-cloud-logout>ログアウト</button>
         </div>
+        <details class="terms-disclosure account-actions">
+          <summary>アカウント操作</summary>
+          <button class="danger-button" type="button" data-cloud-logout>ログアウト</button>
+        </details>
       ` : ""}
     </div>
   `;

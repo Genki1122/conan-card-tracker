@@ -28,6 +28,7 @@ test("the app shell, release metadata, and authentication modules use one deploy
   assert.match(serviceWorker, /src\/matchup-detail\.js/);
   assert.match(serviceWorker, /src\/release-notes\.js/);
   assert.match(serviceWorker, /src\/session-links\.js/);
+  assert.match(serviceWorker, /src\/account-ux\.js/);
   assert.match(serviceWorker, /releases\.json/);
 });
 

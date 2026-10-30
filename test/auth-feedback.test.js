@@ -6,8 +6,19 @@ import { authEmailErrorMessage, authOtpErrorMessage } from "../src/auth-feedback
 test("email rate limits are explained without exposing a technical error", () => {
   assert.equal(
     authEmailErrorMessage(new Error("email rate limit exceeded")),
-    "短時間にメールを複数回送信したため、現在送信できません。しばらく待ってから、もう一度お試しください。"
+    "メール送信の制限に達しています。連続で送信せず、時間をおいてお試しください。解消しない場合はアプリ管理者へ連絡してください。"
   );
+});
+
+test("mail provider configuration errors direct users to support without exposing account existence", () => {
+  for (const error of [
+    { code: "email_address_not_authorized", message: "Email address not authorized" },
+    new Error("Error sending confirmation email"),
+    new Error("SMTP connection failed"),
+  ]) {
+    assert.match(authEmailErrorMessage(error), /管理者/);
+    assert.doesNotMatch(authEmailErrorMessage(error), /登録されていません|存在しません|SMTP/);
+  }
 });
 
 test("email and network failures have actionable Japanese messages", () => {
