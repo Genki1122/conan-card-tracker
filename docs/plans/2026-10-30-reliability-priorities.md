@@ -14,7 +14,9 @@
 - [x] Test and implement `scripts/backup-preflight.sh`: list all missing settings, validate PostgreSQL URL and minimum passphrase length, never print values.
 - [x] Update `.github/workflows/supabase-backup.yml`: checkout, preflight, verify complete decrypted archive against original, job summaries, temporary-file cleanup.
 - [x] Update `docs/backup-and-restore.md` with exact setup links and explicit restoration evidence checklist.
-- [ ] After owner supplies secrets: run backup, verify encrypted artifact, and perform an isolated restore rehearsal. Never restore into production or reset its credentials. Temporary project creation and credentials require owner coordination.
+- [x] After owner supplies secrets: run backup and verify encrypted artifact. [Run 41027199973](https://github.com/Genki1122/conan-card-tracker/actions/runs/41027199973) succeeded; decrypt/compare and upload verified.
+- [ ] Perform an isolated restore rehearsal. Use a disposable GitHub runner database without production credentials for the database check. Hosted Auth/project recovery remains a separate owner-approved project check. Never restore into production or reset its credentials.
+- [ ] Confirm the first scheduled backup after setup.
 
 Tests: `node --test test/backup-config.test.js`; shell syntax and real local GPG round-trip where available. Configuration/SQL file presence is not proof that production backups or state-history triggers are active.
 
