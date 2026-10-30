@@ -15,7 +15,7 @@
 - [x] Update `.github/workflows/supabase-backup.yml`: checkout, preflight, verify complete decrypted archive against original, job summaries, temporary-file cleanup.
 - [x] Update `docs/backup-and-restore.md` with exact setup links and explicit restoration evidence checklist.
 - [x] After owner supplies secrets: run backup and verify encrypted artifact. [Run 41027199973](https://github.com/Genki1122/conan-card-tracker/actions/runs/41027199973) succeeded; decrypt/compare and upload verified.
-- [ ] Perform an isolated restore rehearsal. Use a disposable GitHub runner database without production credentials for the database check. Hosted Auth/project recovery remains a separate owner-approved project check. Never restore into production or reset its credentials.
+- [x] Perform an isolated database restore. [Normal restore check 41034355128](https://github.com/Genki1122/conan-card-tracker/actions/runs/41034355128) passed using the post-installation backup: all 41 tables matched, history/RLS/cascade behavior passed, and cleanup completed. Hosted Auth/project recovery remains a separate owner-approved check. Production was not a restore destination.
 - [x] Obtain approval and enable previously missing production history capture after backup and rehearsal. Verify unchanged existing records. Include parent-account cascade deletion in the rehearsal to prevent a history-trigger regression.
 - [ ] Confirm the first scheduled backup after setup.
 
