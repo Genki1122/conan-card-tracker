@@ -39,9 +39,12 @@ export function localPsqlArgs(target = container) {
   return ["exec", "-i", container, "psql", "--no-psqlrc", "--quiet", "--tuples-only", "--no-align", "--username", "postgres", "--dbname", "postgres", "--set", "ON_ERROR_STOP=1", "--set", "VERBOSITY=sqlstate", "--file", "-"];
 }
 
-export function configureDatabase(config, schema) {
-  const major = schema.match(/^-- Dumped from database version (\d+)\./m)?.[1];
-  if (!["14", "15", "16", "17"].includes(major)) throw new Error("Unsupported or missing PostgreSQL version");
+export function configureDatabase(config, schema, data = "") {
+  const sourceMajor = value => value.match(/^-- Dumped from database version (\d+)\./m)?.[1];
+  const schemaMajor = sourceMajor(schema);
+  const dataMajor = sourceMajor(data);
+  const major = schemaMajor ?? dataMajor;
+  if (!["14", "15", "16", "17"].includes(major)) throw new Error(`Unsupported or missing PostgreSQL version (schema=${schemaMajor ?? "missing"}, data=${dataMajor ?? "missing"})`);
   if (!/^project_id = "restore-check"$/m.test(config) || !/^major_version = \d+$/m.test(config)) throw new Error("Unexpected local database config");
   return config.replace(/^major_version = \d+$/m, `major_version = ${major}`);
 }
@@ -109,7 +112,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv[2] === "configure") {
       const schema = await readFile(process.argv[3], "utf8");
       const config = await readFile(process.argv[4], "utf8");
-      await writeFile(process.argv[4], configureDatabase(config, schema));
+      const data = await readFile(join(process.argv[3], "../data.sql"), "utf8");
+      await writeFile(process.argv[4], configureDatabase(config, schema, data));
     } else if (process.argv[2] === "verify") {
       await verify(process.argv[3]);
     } else throw new Error("Unknown restore-check operation");

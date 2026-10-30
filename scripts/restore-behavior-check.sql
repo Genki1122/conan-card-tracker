@@ -88,6 +88,8 @@ BEGIN
 END $$;
 RESET ROLE;
 
+SELECT set_config('request.jwt.claim.sub', '', true) IS NOT NULL;
+SELECT set_config('request.jwt.claims', '{}', true) IS NOT NULL;
 SET LOCAL ROLE anon;
 DO $$
 DECLARE affected integer;

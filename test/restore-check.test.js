@@ -45,6 +45,7 @@ test("restore config matches the dump PostgreSQL major version", async () => {
   const { configureDatabase } = await import(moduleUrl);
   const config = 'project_id = "restore-check"\n[db]\nmajor_version = 17\n';
   assert.match(configureDatabase(config, "-- Dumped from database version 15.8\n"), /major_version = 15/);
+  assert.match(configureDatabase(config, "-- schema without header", "-- Dumped from database version 17.6\n"), /major_version = 17/);
   assert.throws(() => configureDatabase(config, "unrecognized header"));
   assert.throws(() => configureDatabase('project_id = "production"', "-- Dumped from database version 17.6\n"));
 });
@@ -70,5 +71,6 @@ test("database permission checks exercise own writes and reject anonymous and cr
     assert.ok(sql.includes(message), `Missing behavior assertion: ${message}`);
   }
   assert.match(sql, /SET LOCAL ROLE anon/);
+  assert.match(sql, /set_config\('request\.jwt\.claim\.sub', '', true\)[\s\S]*SET LOCAL ROLE anon/);
   assert.match(sql, /ROLLBACK;/);
 });
