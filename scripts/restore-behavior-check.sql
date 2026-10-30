@@ -36,6 +36,7 @@ BEGIN
   SELECT user_id, data INTO target, previous FROM public.app_states ORDER BY user_id LIMIT 1;
   IF target IS NULL THEN RAISE EXCEPTION 'No saved record to test'; END IF;
   PERFORM set_config('restore_check.user_id', target::text, true);
+  PERFORM set_config('restore_check.other_id', (SELECT user_id::text FROM public.app_states WHERE user_id <> target LIMIT 1), true);
   DELETE FROM public.app_state_versions WHERE user_id = target;
   changed := previous || '{"restoreCheck":"temporary"}'::jsonb;
   UPDATE public.app_states SET data = changed, updated_at = now() WHERE user_id = target;
@@ -52,7 +53,10 @@ END $$;
 SELECT set_config('request.jwt.claim.sub', current_setting('restore_check.user_id'), true) IS NOT NULL;
 SET LOCAL ROLE authenticated;
 DO $$
-DECLARE affected integer;
+DECLARE
+  affected integer;
+  previous jsonb;
+  own_id uuid := current_setting('restore_check.user_id')::uuid;
 BEGIN
   IF (SELECT count(*) FROM public.app_states) <> 1 THEN
     RAISE EXCEPTION 'User cannot see exactly their own record';
@@ -63,6 +67,52 @@ BEGIN
   UPDATE public.app_states SET updated_at = now() WHERE user_id <> current_setting('restore_check.user_id')::uuid;
   GET DIAGNOSTICS affected = ROW_COUNT;
   IF affected <> 0 THEN RAISE EXCEPTION 'Other users records are writable'; END IF;
+  DELETE FROM public.app_states WHERE user_id <> own_id;
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 0 THEN RAISE EXCEPTION 'Other users records are deletable'; END IF;
+  BEGIN
+    INSERT INTO public.app_states (user_id, data) VALUES (current_setting('restore_check.other_id')::uuid, '{}'::jsonb);
+    RAISE EXCEPTION 'Cross-user insert was allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  SELECT data INTO previous FROM public.app_states WHERE user_id = own_id;
+  UPDATE public.app_states SET data = data || '{"restoreCheck":"own-write"}'::jsonb WHERE user_id = own_id;
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 1 THEN RAISE EXCEPTION 'Own update failed'; END IF;
+  DELETE FROM public.app_states WHERE user_id = own_id;
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 1 THEN RAISE EXCEPTION 'Own delete failed'; END IF;
+  INSERT INTO public.app_states (user_id, data) VALUES (own_id, previous);
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 1 THEN RAISE EXCEPTION 'Own insert failed'; END IF;
+END $$;
+RESET ROLE;
+
+SET LOCAL ROLE anon;
+DO $$
+DECLARE affected integer;
+BEGIN
+  BEGIN
+    IF EXISTS (SELECT 1 FROM public.app_states) THEN RAISE EXCEPTION 'Anonymous read was allowed'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.app_states (user_id, data) VALUES (current_setting('restore_check.user_id')::uuid, '{}'::jsonb);
+    RAISE EXCEPTION 'Anonymous insert was allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    UPDATE public.app_states SET updated_at = now();
+    GET DIAGNOSTICS affected = ROW_COUNT;
+    IF affected <> 0 THEN RAISE EXCEPTION 'Anonymous update was allowed'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    DELETE FROM public.app_states;
+    GET DIAGNOSTICS affected = ROW_COUNT;
+    IF affected <> 0 THEN RAISE EXCEPTION 'Anonymous delete was allowed'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 END $$;
 RESET ROLE;
 ROLLBACK;

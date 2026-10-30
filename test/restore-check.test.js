@@ -63,3 +63,12 @@ test("restore workflow only uses saved backups, never production DB credentials"
   const steps = workflow.jobs.restore.steps;
   assert.ok(steps.findIndex(step => step.name === "Isolate local database") < steps.findIndex(step => step.name === "Restore and verify backup"));
 });
+
+test("database permission checks exercise own writes and reject anonymous and cross-user writes", async () => {
+  const sql = await readFile(new URL("scripts/restore-behavior-check.sql", root), "utf8");
+  for (const message of ["Own update failed", "Own delete failed", "Own insert failed", "Cross-user insert was allowed", "Anonymous read was allowed", "Anonymous insert was allowed"]) {
+    assert.ok(sql.includes(message), `Missing behavior assertion: ${message}`);
+  }
+  assert.match(sql, /SET LOCAL ROLE anon/);
+  assert.match(sql, /ROLLBACK;/);
+});
